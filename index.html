@@ -874,14 +874,19 @@
       };
 
       const handleBatchImport = () => {
-        if (!batchInput.trim() || !user || !selectedClassId) return;
+        if (!batchInput.trim() || !user) return;
+        // 如果在班級儀表板內，必須要有選擇班級
+        if (viewMode === 'class_dashboard' && !selectedClassId) return;
         
         const lines = batchInput.split('\n').filter(line => line.trim() !== '');
         const batch = writeBatch(db);
         let count = 0;
 
-        const classStudentsForOrder = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
-        let currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, getStudentOrder(s, selectedClassId)), 0);
+        let currentMaxOrder = 0;
+        if (viewMode === 'class_dashboard') {
+            const classStudentsForOrder = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
+            currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, getStudentOrder(s, selectedClassId)), 0);
+        }
 
         lines.forEach(line => {
           const match = line.trim().match(/^(\d+)[\s.、,-]*(.+)$/);
@@ -894,21 +899,27 @@
           }
 
           if (name) {
-            currentMaxOrder++;
             const newId = `s${Date.now()}_${count++}`;
             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'students', newId);
-            batch.set(ref, {
+            
+            const studentData = {
               id: newId,
               name: name,
               balance: 0,
               history: [{ id: Date.now() + count, date: new Date().toLocaleDateString(), reason: '批次建立', amount: 0 }],
-              classInfo: {
-                 [selectedClassId]: {
+              classInfo: {}
+            };
+
+            // 只有在班級內匯入時，才賦予該班級的座號與排序
+            if (viewMode === 'class_dashboard') {
+                currentMaxOrder++;
+                studentData.classInfo[selectedClassId] = {
                     seatNumber: seatNumber,
                     order: currentMaxOrder
-                 }
-              }
-            });
+                };
+            }
+
+            batch.set(ref, studentData);
           }
         });
 
@@ -916,7 +927,9 @@
         setBatchInput('');
 
         if (count > 0) {
-          batch.commit().catch(err => console.error(err));
+          batch.commit()
+            .then(() => showToast(`成功匯入 ${count} 位學生`, "success"))
+            .catch(err => console.error(err));
         }
       };
 
@@ -1287,6 +1300,12 @@
                       <p className="text-blue-600 text-sm mt-1">管理所有學生資料，同一學生可加入多個班級且點數互通</p>
                     </div>
                     <div className="flex gap-2">
+                       <button 
+                        onClick={() => setIsBatchImportOpen(true)}
+                        className="bg-white border border-blue-200 text-blue-700 px-4 py-2 rounded-lg shadow-sm hover:bg-blue-50 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
+                       >
+                         <ListPlus size={18} className="mr-2 shrink-0" /> 批次匯入
+                       </button>
                        <button 
                         onClick={() => setIsAddGlobalStudentOpen(true)}
                         className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md hover:bg-blue-700 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
