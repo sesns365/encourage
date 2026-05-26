@@ -1,0 +1,2278 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>鼓勵存摺</title>
+  
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 引入 Babel 用於在瀏覽器中編譯 JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body { font-family: sans-serif; }
+    .bg-dot-pattern { background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+    /* Hide scrollbar for Chrome, Safari and Opera */
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    /* Hide scrollbar for IE, Edge and Firefox */
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- 主要應用程式邏輯 (設定為 module 以支援 import) -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect } from 'https://esm.sh/react@18.2.0';
+    import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+    
+    // 引入 Lucide 圖示
+    import * as LucideIcons from 'https://esm.sh/lucide-react@0.294.0';
+    const { 
+      Users, UserPlus, BookOpen, Clock, Briefcase, FileText, Smile, Star, Coins,
+      School, Database, ArrowLeft, Trash2, MoreVertical, LayoutGrid, Download,
+      MinusCircle, PlusCircle, CheckCircle2, ExternalLink, Gift, ShoppingBag, Plus,
+      Send, AlertTriangle, X, Settings, Edit2, ChevronUp, ChevronDown, PenLine,
+      Tags, Filter, ChevronLeft, ChevronRight, FolderEdit, Search, ListPlus
+    } = LucideIcons;
+
+    // 引入 Firebase SDK
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+    import { 
+      getAuth, signInAnonymously, onAuthStateChanged 
+    } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+    import { 
+      getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, writeBatch
+    } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+    // --- Firebase 初始化 ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyBXo1w7t0m628itmIc80yxbdWCXeQFSqzw",
+      authDomain: "encourage-aac2a.firebaseapp.com",
+      projectId: "encourage-aac2a",
+      storageBucket: "encourage-aac2a.firebasestorage.app",
+      messagingSenderId: "199149170670",
+      appId: "1:199149170670:web:4819074ddd69597641a8ff"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'encourage-aac2a'; // 固定使用您的專案 ID 作為 appId
+
+    // --- 組件：擬真硬幣 ---
+    const Coin = ({ value, onClick, label, isDeduct }) => {
+      let bgColor = isDeduct ? "bg-red-500" : "bg-yellow-400";
+      let borderColor = isDeduct ? "border-red-700" : "border-yellow-600";
+      let textColor = isDeduct ? "text-white" : "text-yellow-900";
+      let size = "w-12 h-12 md:w-14 md:h-14"; 
+
+      const displayValue = isDeduct ? `-${value}` : `${value}`;
+
+      if (value === 50) {
+        bgColor = isDeduct ? "bg-red-600" : "bg-yellow-500";
+        size = "w-14 h-14 md:w-16 md:h-16";
+      } else if (value === 10) {
+        bgColor = isDeduct ? "bg-red-400" : "bg-gray-300";
+        borderColor = isDeduct ? "border-red-600" : "border-gray-500";
+        textColor = isDeduct ? "text-white" : "text-gray-800";
+        size = "w-12 h-12 md:w-14 md:h-14";
+      } else if (value === 5) {
+        bgColor = isDeduct ? "bg-red-300" : "bg-gray-200";
+        borderColor = isDeduct ? "border-red-500" : "border-gray-400";
+        textColor = isDeduct ? "text-white" : "text-gray-700";
+      } else {
+        bgColor = isDeduct ? "bg-red-200" : "bg-orange-200";
+        borderColor = isDeduct ? "border-red-400" : "border-orange-600";
+        textColor = isDeduct ? "text-red-900" : "text-orange-900";
+        size = "w-10 h-10 md:w-12 md:h-12";
+      }
+
+      return (
+        <button 
+          onClick={onClick}
+          className={`${size} ${bgColor} ${borderColor} border-4 rounded-full flex items-center justify-center shadow-lg transform active:scale-95 transition-all hover:-translate-y-1 mx-1 md:mx-2 relative group flex-shrink-0`}
+        >
+          <div className="absolute inset-1 border border-dashed border-opacity-50 border-white rounded-full"></div>
+          <span className={`font-bold text-lg ${textColor} drop-shadow-sm`}>${displayValue}</span>
+          <span className="absolute -bottom-8 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-50 pointer-events-none">
+            {label || (isDeduct ? `扣 ${value} 元` : `加 ${value} 元`)}
+          </span>
+        </button>
+      );
+    };
+
+    // --- 組件：任務卡片 ---
+    const TaskCard = ({ icon: Icon, title, points, color, onClick, isVariable, isDeduct }) => {
+      const displayPoints = isDeduct 
+        ? (typeof points === 'string' ? `-${points}` : `-${points}`) 
+        : `+${points}`;
+        
+      const finalColor = isDeduct ? 'border-red-300 bg-red-50 hover:bg-red-100' : `${color} bg-white hover:bg-opacity-50`;
+      const iconColor = isDeduct ? 'text-red-500' : color.replace('border-', 'text-').replace('200', '600');
+      const iconBg = isDeduct ? 'bg-red-100' : color.replace('border-', 'bg-').replace('200', '100');
+      const badgeColor = isDeduct ? 'bg-red-600 text-white border-red-700' : 'bg-red-100 text-red-600 border-red-200';
+
+      return (
+        <button 
+          onClick={onClick}
+          className={`relative flex flex-col items-center p-2 rounded-xl border-2 ${finalColor} shadow-sm hover:shadow-md transition-all active:scale-95 w-full min-h-[90px] justify-center`}
+        >
+          <div className={`p-2 rounded-full mb-1 ${iconBg}`}>
+            <Icon size={18} className={iconColor} />
+          </div>
+          <span className="font-bold text-gray-700 text-xs mb-1 text-center leading-tight">{title}</span>
+          <div className={`${badgeColor} text-[10px] font-bold px-2 py-0.5 rounded-full border`}>
+            {displayPoints}
+          </div>
+          {isVariable && (
+            <span className="absolute top-2 right-2 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+            </span>
+          )}
+        </button>
+      );
+    };
+
+    // --- 組件：商品卡片 ---
+    const RewardCard = ({ item, onClick, onDelete, onEdit, onMoveUp, onMoveDown, isManagementMode, isFirst, isLast }) => {
+      if (!item) return null;
+      return (
+        <div 
+          onClick={onClick}
+          className={`relative flex flex-col items-center p-3 rounded-xl border-2 bg-white shadow-sm hover:shadow-md transition-all active:scale-95 w-full min-h-[140px] justify-center group cursor-pointer
+            ${isManagementMode ? 'border-gray-200' : 'border-purple-200 hover:bg-purple-50'}
+          `}
+        >
+          <div className="p-3 rounded-full mb-2 bg-purple-100 text-purple-600 relative">
+            <Gift size={24} />
+          </div>
+          
+          {item.categoryName && (
+            <div className="absolute top-2 left-2 text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded border border-purple-100 max-w-[60px] truncate">
+              {item.categoryName}
+            </div>
+          )}
+
+          <span className="font-bold text-gray-700 text-sm mb-1 text-center leading-tight line-clamp-2 px-2 w-full">{item.name || '未命名'}</span>
+          <div className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full border border-gray-300 mt-auto">
+            ${item.cost || 0}
+          </div>
+          
+          {isManagementMode && (
+            <>
+              <div className="absolute top-2 right-2 flex flex-col gap-1 z-10">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onEdit(item); }}
+                  className="p-1 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors bg-white/80 backdrop-blur-sm"
+                  title="編輯"
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors bg-white/80 backdrop-blur-sm"
+                  title="刪除"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              <div className="absolute bottom-2 right-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-white/80 rounded backdrop-blur-sm">
+                 <button 
+                  onClick={(e) => { e.stopPropagation(); onMoveUp(item); }}
+                  disabled={isFirst}
+                  className="p-1 text-gray-500 hover:text-purple-600 hover:bg-purple-100 rounded disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                  title="向前移動"
+                 >
+                   <ChevronLeft size={16} />
+                 </button>
+                 <button 
+                  onClick={(e) => { e.stopPropagation(); onMoveDown(item); }}
+                  disabled={isLast}
+                  className="p-1 text-gray-500 hover:text-purple-600 hover:bg-purple-100 rounded disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                  title="向後移動"
+                 >
+                   <ChevronRight size={16} />
+                 </button>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    };
+
+    // --- 組件：通用編輯列 (極致防呆機制) ---
+    const EditRow = ({ item, index, total, onMove, onUpdateName, onDeleteRequest, placeholder }) => {
+      const [localName, setLocalName] = useState(item?.name || '');
+
+      useEffect(() => {
+        setLocalName(item?.name || '');
+      }, [item?.name]);
+
+      const handleBlur = () => {
+        if (!item || !item.id) return;
+        const cleanName = localName.trim();
+        if (cleanName !== (item.name || '') && cleanName !== '') {
+          onUpdateName(item.id, cleanName);
+        } else {
+          setLocalName(item.name || ''); 
+        }
+      };
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Enter') {
+          e.target.blur(); 
+        }
+      };
+
+      if (!item) return null;
+
+      return (
+        <div className="flex items-center gap-2 p-2 bg-white border rounded-lg shadow-sm hover:border-amber-300 transition-colors">
+          <div className="flex flex-col gap-1">
+            <button 
+              onClick={() => onMove(index, -1)}
+              disabled={index === 0}
+              className="p-1 text-gray-400 hover:text-amber-600 disabled:opacity-30 hover:bg-gray-100 rounded"
+            >
+              <ChevronUp size={16} />
+            </button>
+            <button 
+              onClick={() => onMove(index, 1)}
+              disabled={index >= total - 1}
+              className="p-1 text-gray-400 hover:text-amber-600 disabled:opacity-30 hover:bg-gray-100 rounded"
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+
+          <input 
+            className="flex-1 p-2 border border-gray-200 rounded focus:border-amber-400 outline-none"
+            value={localName}
+            onChange={(e) => setLocalName(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+          />
+
+          <button 
+            onClick={() => onDeleteRequest(item)}
+            className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+            title="刪除"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
+      );
+    };
+
+    function App() {
+      // --- 狀態管理 ---
+      const [user, setUser] = useState(null);
+      
+      // 資料庫原始資料狀態 
+      const [classesData, setClassesData] = useState([]);
+      const [studentsData, setStudentsData] = useState([]);
+      const [rewardsData, setRewardsData] = useState([]); 
+      const [categoriesData, setCategoriesData] = useState([]); 
+      
+      // 視圖狀態
+      const [selectedClassId, setSelectedClassId] = useState('');
+      const [viewMode, setViewMode] = useState('class_dashboard'); 
+      const [selectedStudentId, setSelectedStudentId] = useState('');
+
+      // 搜尋與篩選狀態
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // 功能狀態
+      const [isDeductMode, setIsDeductMode] = useState(false); 
+      const [multiSelectedIds, setMultiSelectedIds] = useState([]); 
+      const [actionTab, setActionTab] = useState('earn'); 
+      const [customPoints, setCustomPoints] = useState('');
+      const [customReason, setCustomReason] = useState(''); 
+
+      // UI 狀態
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [currentTask, setCurrentTask] = useState(null);
+      const [modalReason, setModalReason] = useState(''); 
+      const [toast, setToast] = useState(null); // 新增 Toast 狀態
+      const [redeemConfirmTarget, setRedeemConfirmTarget] = useState(null); // 新增兌換確認目標
+      
+      const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+      const [newStudentName, setNewStudentName] = useState('');
+      const [newStudentSeat, setNewStudentSeat] = useState(''); // 座號
+      
+      const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
+      const [batchInput, setBatchInput] = useState('');
+
+      const [isAddClassOpen, setIsAddClassOpen] = useState(false);
+      const [newClassName, setNewClassName] = useState('');
+      const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+      
+      // 商店與管理 UI 狀態
+      const [isAddRewardOpen, setIsAddRewardOpen] = useState(false);
+      const [newRewardName, setNewRewardName] = useState('');
+      const [newRewardCost, setNewRewardCost] = useState('');
+      const [newRewardCategoryId, setNewRewardCategoryId] = useState(''); 
+      const [editingReward, setEditingReward] = useState(null);
+      
+      // 商店分類狀態
+      const [selectedCategoryId, setSelectedCategoryId] = useState('all'); 
+      const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false); 
+      const [newCategoryName, setNewCategoryName] = useState('');
+      const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+
+      const [isManageClassesOpen, setIsManageClassesOpen] = useState(false); 
+      const [renameTarget, setRenameTarget] = useState(null); 
+
+      // 交易明細編輯狀態
+      const [editingHistoryItem, setEditingHistoryItem] = useState(null); 
+      const [editHistoryForm, setEditHistoryForm] = useState({ reason: '', amount: 0, date: '' });
+
+      const [deleteTarget, setDeleteTarget] = useState(null); 
+
+      // --- Firebase Auth ---
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            // 已切換為您的專屬 Firebase，這裡直接使用匿名登入
+            await signInAnonymously(auth);
+          } catch (err) {
+            console.error("Auth Init Error:", err);
+            // 若未開啟匿名登入，顯示提醒
+            if (err.code === 'auth/operation-not-allowed') {
+               console.warn("請至 Firebase 控制台的 Authentication 開啟「匿名 (Anonymous)」登入！");
+            }
+          }
+        };
+        initAuth();
+        const unsub = onAuthStateChanged(auth, setUser);
+        return () => unsub();
+      }, []);
+
+      // --- Firebase Data Sync ---
+      useEffect(() => {
+        if (!user) return;
+        
+        const unsubClasses = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'classes')), (snapshot) => {
+          const loadedClasses = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          loadedClasses.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setClassesData(loadedClasses);
+          if (!selectedClassId && loadedClasses.length > 0) {
+            setSelectedClassId(loadedClasses[0].id);
+          }
+        }, (err) => console.error(err));
+
+        const unsubStudents = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'students')), (snapshot) => {
+          const loadedStudents = snapshot.docs.map(d => ({ 
+            id: d.id, 
+            order: d.data().order || 0, // 加入 order 欄位
+            ...d.data() 
+          }));
+          setStudentsData(loadedStudents);
+        }, (err) => console.error(err));
+
+        const unsubCategories = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'categories')), (snapshot) => {
+          const loadedCategories = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          loadedCategories.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setCategoriesData(loadedCategories);
+        }, (err) => console.error(err));
+
+        const unsubRewards = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'rewards')), (snapshot) => {
+          const loadedRewards = snapshot.docs.map(d => ({ 
+            id: d.id, 
+            order: d.data().order || 0, 
+            ...d.data() 
+          }));
+          setRewardsData(loadedRewards);
+        }, (err) => console.error(err));
+
+        return () => { unsubClasses(); unsubStudents(); unsubCategories(); unsubRewards(); };
+      }, [user, selectedClassId]);
+
+      // --- 業務邏輯安全過濾 (防呆陣列) ---
+      const safeClasses = (classesData || []).filter(c => c && c.id);
+      const safeStudents = (studentsData || []).filter(s => s && s.id);
+      const safeCategories = (categoriesData || []).filter(c => c && c.id);
+      const safeRewards = (rewardsData || []).filter(r => r && r.id);
+
+      // 商店商品處理
+      const enhancedRewards = safeRewards.map(r => {
+        const cat = safeCategories.find(c => c.id === r.categoryId);
+        return { ...r, categoryName: cat ? cat.name : null };
+      }).sort((a, b) => {
+        const catIdA = String(a.categoryId || '');
+        const catIdB = String(b.categoryId || '');
+        if (catIdA !== catIdB) return catIdA.localeCompare(catIdB);
+        if (a.order !== b.order) return (a.order || 0) - (b.order || 0);
+        return (a.cost || 0) - (b.cost || 0);
+      });
+
+      const displayedRewards = selectedCategoryId === 'all' 
+        ? enhancedRewards 
+        : enhancedRewards.filter(r => r.categoryId === selectedCategoryId);
+
+      // 學生名單處理 (搜尋與排序)
+      const currentClass = safeClasses.find(c => c.id === selectedClassId);
+      const classStudents = safeStudents.filter(s => s.classId === selectedClassId);
+      const selectedStudent = safeStudents.find(s => s.id === selectedStudentId);
+
+      let filteredStudents = classStudents;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        filteredStudents = classStudents.filter(s => {
+          // 強制轉為字串並比對，確保無論是座號還是姓名都能精準搜尋到
+          const matchName = String(s.name || '').toLowerCase().includes(q);
+          const matchSeat = String(s.seatNumber || '').toLowerCase().includes(q);
+          return matchName || matchSeat;
+        });
+      }
+      
+      // 排序：自訂排序(order)優先 -> 座號 -> 姓名
+      filteredStudents.sort((a, b) => {
+        // 1. 先比較自訂排序 order
+        const orderA = a.order || 0;
+        const orderB = b.order || 0;
+        if (orderA !== orderB) return orderA - orderB;
+
+        // 2. 若 order 相同，再比較座號
+        const numA = parseInt(a.seatNumber, 10);
+        const numB = parseInt(b.seatNumber, 10);
+        const validA = !isNaN(numA);
+        const validB = !isNaN(numB);
+
+        if (validA && validB) return numA - numB;
+        if (validA) return -1;
+        if (validB) return 1;
+        
+        // 3. 最後依名稱排序
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+      // 切換視圖
+      const handleSwitchClass = (classId) => {
+        setSelectedClassId(classId);
+        setViewMode('class_dashboard');
+        setSelectedStudentId('');
+        setMultiSelectedIds([]); 
+        setIsDeductMode(false); 
+        setActionTab('earn');
+        setCustomReason('');
+        setCustomPoints('');
+        setSearchQuery(''); // 清空搜尋
+        if (window.innerWidth < 768) setIsSidebarOpen(false);
+      };
+
+      const handleGoToStore = () => {
+        setViewMode('store_management');
+        setSelectedStudentId('');
+        setMultiSelectedIds([]);
+        setSearchQuery('');
+        if (window.innerWidth < 768) setIsSidebarOpen(false);
+      };
+
+      const handleSelectStudentDetail = (studentId) => {
+        setSelectedStudentId(studentId);
+        setViewMode('student_detail');
+      };
+
+      const handleBackToClass = () => {
+        setViewMode('class_dashboard');
+        setSelectedStudentId('');
+      };
+
+      // CSV 匯出
+      const exportToCSV = () => {
+        if (!classStudents || classStudents.length === 0) return;
+        const headers = ["班級", "座號", "姓名", "目前餘額", "最後更新日期", "最後摘要"];
+        
+        // 匯出時也依照座號排序
+        const sortedForExport = [...classStudents].sort((a, b) => {
+          const numA = parseInt(a.seatNumber, 10);
+          const numB = parseInt(b.seatNumber, 10);
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          if (!isNaN(numA)) return -1;
+          if (!isNaN(numB)) return 1;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+
+        const rows = sortedForExport.map(student => {
+          const safeHistory = student.history || [];
+          const lastRecord = safeHistory.length > 0 ? safeHistory[0] : {};
+          return [
+            currentClass?.name || '-',
+            student.seatNumber || '',
+            student.name || '未命名',
+            student.balance || 0,
+            lastRecord.date || '-',
+            lastRecord.reason || '-'
+          ].map(field => `"${field}"`).join(",");
+        });
+        const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${currentClass?.name || '鼓勵存摺'}_${new Date().toLocaleDateString()}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const showToast = (msg, type = 'info') => {
+         setToast({ msg, type });
+         setTimeout(() => setToast(null), 3000);
+      };
+
+      // --- 加扣分核心 (樂觀無延遲) ---
+      const applyPoints = (baseAmount, reason) => {
+        if (!user) return;
+
+        let amount = 0;
+        let finalReason = reason || '系統調整';
+
+        if (actionTab === 'redeem') {
+          amount = -Math.abs(baseAmount || 0); 
+          finalReason = `兌換獎品：${finalReason}`;
+        } else {
+          amount = isDeductMode ? -Math.abs(baseAmount || 0) : Math.abs(baseAmount || 0);
+          finalReason = isDeductMode ? `(扣款) ${finalReason}` : finalReason;
+        }
+
+        const timestamp = Date.now();
+        const dateStr = new Date().toLocaleDateString();
+        const batch = writeBatch(db);
+
+        let targets = [];
+        if (viewMode === 'student_detail' && selectedStudent) {
+          targets = [selectedStudent];
+        } else {
+          if (multiSelectedIds.length > 0) {
+            targets = classStudents.filter(s => multiSelectedIds.includes(s.id));
+          } else {
+            targets = []; 
+          }
+        }
+
+        if (targets.length === 0) {
+          showToast("請先選擇學生，或點擊「全選」！", "warning");
+          return;
+        }
+
+        targets.forEach(stu => {
+          if (!stu.id) return;
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'students', stu.id);
+          const newTransaction = {
+            id: timestamp + Math.random(),
+            date: dateStr,
+            reason: targets.length > 1 ? `(批量) ${finalReason}` : finalReason,
+            amount: amount
+          };
+          
+          const currentHistory = stu.history || [];
+          batch.update(ref, {
+            balance: (stu.balance || 0) + amount,
+            history: [newTransaction, ...currentHistory]
+          });
+        });
+
+        batch.commit().then(() => {
+          if (actionTab !== 'redeem') {
+             showToast("操作成功！", "success");
+          }
+        }).catch(error => {
+          console.error("Batch Update Error:", error);
+          showToast("部分資料儲存失敗，請確認網路連線。", "error");
+        });
+      };
+
+      const handleTaskAction = (task) => {
+        if (!task) return;
+        if (task.isVariable) {
+          setCurrentTask(task);
+          setModalReason(''); 
+          setIsModalOpen(true);
+        } else {
+          applyPoints(task.points, task.title);
+        }
+      };
+
+      const handleCustomPointsSubmit = () => {
+        const points = parseInt(customPoints, 10);
+        if (isNaN(points) || points <= 0) {
+          showToast("請輸入有效的正整數", "warning");
+          return;
+        }
+        const reason = customReason.trim() || (isDeductMode ? '自訂扣款' : '自訂加分');
+        applyPoints(points, reason);
+        
+        setCustomPoints('');
+        setCustomReason('');
+      };
+
+      // --- 商店群組管理 (樂觀無延遲) ---
+      const handleAddCategory = () => {
+        if (!newCategoryName.trim() || !user) return;
+        const newId = `cat${Date.now()}`;
+        const maxOrder = safeCategories.reduce((max, c) => Math.max(max, c.order || 0), 0);
+        
+        const catData = {
+          id: newId,
+          name: newCategoryName.trim(),
+          order: maxOrder + 1
+        };
+
+        setNewCategoryName('');
+        setIsAddCategoryOpen(false);
+
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', newId), catData)
+          .catch(err => console.error("Error adding category:", err));
+      };
+
+      const updateCategoryName = (id, newName) => {
+        if (!id) return;
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id), { name: newName })
+          .catch(err => console.error(err));
+      };
+
+      const moveCategory = (index, direction) => {
+        const newIndex = index + direction;
+        if (newIndex < 0 || newIndex >= safeCategories.length) return;
+
+        const catA = safeCategories[index];
+        const catB = safeCategories[newIndex];
+        if (!catA || !catB) return;
+        
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'categories', catA.id), { order: catB.order ?? newIndex });
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'categories', catB.id), { order: catA.order ?? index });
+        batch.commit().catch(err => console.error(err));
+      };
+
+      const requestDeleteCategory = (category) => {
+        if (!category) return;
+        setDeleteTarget({ type: 'category', id: category.id, name: category.name });
+      };
+
+      // --- 商店獎品管理 (樂觀無延遲) ---
+      const handleOpenAddReward = () => {
+        setNewRewardName('');
+        setNewRewardCost('');
+        setNewRewardCategoryId(selectedCategoryId === 'all' ? (safeCategories.length > 0 ? safeCategories[0].id : '') : selectedCategoryId);
+        setIsAddRewardOpen(true);
+      };
+
+      const handleAddReward = () => {
+        if (!newRewardName.trim() || newRewardCost === '' || !user) return;
+        const cost = parseInt(newRewardCost, 10);
+        if (isNaN(cost) || cost < 0) return;
+
+        const newId = `r${Date.now()}`;
+        const catRewards = safeRewards.filter(r => r.categoryId === newRewardCategoryId);
+        const maxOrder = catRewards.reduce((max, r) => Math.max(max, r.order || 0), 0);
+
+        const rewardData = {
+          id: newId,
+          name: newRewardName.trim(),
+          cost: cost,
+          categoryId: newRewardCategoryId || null, 
+          order: maxOrder + 1
+        };
+
+        setNewRewardName('');
+        setNewRewardCost('');
+        setIsAddRewardOpen(false);
+
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', newId), rewardData)
+          .catch(err => console.error(err));
+      };
+
+      const handleUpdateReward = () => {
+        if (!editingReward || !editingReward.id || !(editingReward.name || '').trim()) return;
+        const cost = parseInt(editingReward.cost, 10);
+        if (isNaN(cost) || cost < 0) return;
+
+        const targetId = editingReward.id;
+        const updateData = {
+            name: editingReward.name.trim(),
+            cost: cost,
+            categoryId: editingReward.categoryId || null
+        };
+
+        setEditingReward(null);
+
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', targetId), updateData)
+          .catch(err => console.error(err));
+      };
+
+      const handleRedeemRewardClick = (reward) => {
+        if(!reward) return;
+        let hasTargets = false;
+        if (viewMode === 'student_detail' && selectedStudent) hasTargets = true;
+        else if (multiSelectedIds.length > 0) hasTargets = true;
+
+        if (!hasTargets) {
+            showToast("請先選擇學生，或點擊「全選」！", "warning");
+            return;
+        }
+        setRedeemConfirmTarget(reward);
+      };
+
+      const confirmRedeem = () => {
+         if (!redeemConfirmTarget) return;
+         applyPoints(redeemConfirmTarget.cost, redeemConfirmTarget.name);
+         setRedeemConfirmTarget(null);
+         showToast(`成功兌換：${redeemConfirmTarget.name}`, "success");
+      };
+
+      const moveReward = (reward, direction) => {
+        if(!reward) return;
+        const catRewards = enhancedRewards.filter(r => r.categoryId === reward.categoryId);
+        const currentIndex = catRewards.findIndex(r => r.id === reward.id);
+        const newIndex = currentIndex + direction;
+
+        if (newIndex < 0 || newIndex >= catRewards.length) return;
+
+        const targetReward = catRewards[newIndex];
+        if (!targetReward) return;
+        
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', reward.id), { order: targetReward.order ?? newIndex });
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', targetReward.id), { order: reward.order ?? currentIndex });
+        batch.commit().catch(err => console.error(err));
+      };
+
+      // --- 刪除邏輯 (樂觀無延遲) ---
+      const confirmDelete = () => {
+        if (!deleteTarget) return; // 放寬檢查，不再強制要求 deleteTarget.id 必須存在
+        const batch = writeBatch(db);
+
+        const { type, id, studentId, transactionId, historyIndex, amount } = deleteTarget;
+
+        setDeleteTarget(null);
+
+        if (type === 'student') {
+           batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'students', id));
+           setMultiSelectedIds(prev => prev.filter(pid => pid !== id));
+        } else if (type === 'reward') {
+           batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', id));
+        } else if (type === 'class') {
+           batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'classes', id));
+           if (selectedClassId === id) setSelectedClassId('');
+           
+           const studentsToDelete = safeStudents.filter(s => s.classId === id);
+           studentsToDelete.forEach(s => {
+              if (s.id) batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'students', s.id));
+           });
+
+        } else if (type === 'category') {
+           batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id));
+           if (selectedCategoryId === id) setSelectedCategoryId('all');
+           
+           const rewardsToUpdate = safeRewards.filter(r => r.categoryId === id);
+           rewardsToUpdate.forEach(r => {
+              if (r.id) batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', r.id), { categoryId: null });
+           });
+
+        } else if (type === 'history') {
+           const student = safeStudents.find(s => s.id === studentId);
+           if (student) {
+              // 精準透過陣列索引 index 移除項目，確保 100% 成功刪除
+              const newHistory = (student.history || []).filter((h, index) => index !== historyIndex);
+              const newBalance = (student.balance || 0) - Number(amount || 0); 
+              batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', studentId), {
+                 balance: newBalance,
+                 history: newHistory
+              });
+           }
+        }
+        
+        batch.commit().catch(err => console.error("Delete Error", err));
+      };
+
+      // --- 班級與學生管理 (樂觀無延遲) ---
+      
+      // 單一新增學生
+      const handleAddStudent = () => {
+        if (!newStudentName.trim() || !user || !selectedClassId) return;
+        const newId = `s${Date.now()}`;
+        
+        // 找出目前班級學生的最大 order
+        const classStudentsForOrder = safeStudents.filter(s => s.classId === selectedClassId);
+        const maxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, s.order || 0), 0);
+
+        const studentData = {
+          id: newId,
+          classId: selectedClassId,
+          name: newStudentName.trim(),
+          seatNumber: newStudentSeat.trim(),
+          balance: 0,
+          order: maxOrder + 1, // 賦予新的 order
+          history: [{ id: Date.now(), date: new Date().toLocaleDateString(), reason: '開戶', amount: 0 }]
+        };
+
+        setNewStudentName('');
+        setNewStudentSeat('');
+        setIsAddStudentOpen(false);
+
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', newId), studentData)
+          .catch(err => console.error(err));
+      };
+
+      // 批次匯入學生
+      const handleBatchImport = () => {
+        if (!batchInput.trim() || !user || !selectedClassId) return;
+        
+        const lines = batchInput.split('\n').filter(line => line.trim() !== '');
+        const batch = writeBatch(db);
+        let count = 0;
+
+        // 找出目前班級學生的最大 order
+        const classStudentsForOrder = safeStudents.filter(s => s.classId === selectedClassId);
+        let currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, s.order || 0), 0);
+
+        lines.forEach(line => {
+          // 支援格式：「1 王小明」、「02, 李四」、「張三」
+          const match = line.trim().match(/^(\d+)[\s.、,-]*(.+)$/);
+          let seatNumber = '';
+          let name = line.trim();
+
+          if (match) {
+            seatNumber = match[1];
+            name = match[2].trim();
+          }
+
+          if (name) {
+            currentMaxOrder++;
+            const newId = `s${Date.now()}_${count++}`;
+            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'students', newId);
+            batch.set(ref, {
+              id: newId,
+              classId: selectedClassId,
+              seatNumber: seatNumber,
+              name: name,
+              balance: 0,
+              order: currentMaxOrder, // 依序賦予 order
+              history: [{ id: Date.now() + count, date: new Date().toLocaleDateString(), reason: '批次建立', amount: 0 }]
+            });
+          }
+        });
+
+        setIsBatchImportOpen(false);
+        setBatchInput('');
+
+        if (count > 0) {
+          batch.commit().catch(err => console.error(err));
+        }
+      };
+
+      const handleAddClass = () => {
+        if (!newClassName.trim() || !user) return;
+        const newId = `c${Date.now()}`;
+        const maxOrder = safeClasses.reduce((max, c) => Math.max(max, c.order || 0), 0);
+        
+        const classData = {
+          id: newId,
+          name: newClassName.trim(),
+          order: maxOrder + 1
+        };
+
+        setNewClassName('');
+        setIsAddClassOpen(false);
+        handleSwitchClass(newId);
+
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', newId), classData)
+          .catch(err => console.error(err));
+      };
+
+      const updateClassName = (id, newName) => {
+         if (!id) return;
+         updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', id), { name: newName })
+           .catch(err => console.error(err));
+      };
+
+      const moveClass = (index, direction) => {
+        const newIndex = index + direction;
+        if (newIndex < 0 || newIndex >= safeClasses.length) return;
+
+        const classA = safeClasses[index];
+        const classB = safeClasses[newIndex];
+        if (!classA || !classB) return;
+        
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classA.id), { order: classB.order ?? newIndex });
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classB.id), { order: classA.order ?? index });
+        batch.commit().catch(err => console.error(err));
+      };
+
+      const requestDeleteClass = (cls) => {
+        if (!cls) return;
+        setDeleteTarget({ type: 'class', id: cls.id, name: cls.name });
+      };
+
+      const openEditHistory = (record, student, index) => {
+         if (!record || !student) return;
+         setEditingHistoryItem({ record, studentId: student.id, historyIndex: index });
+         setEditHistoryForm({ 
+            reason: record.reason || '', 
+            amount: record.amount || 0, 
+            date: record.date || new Date().toLocaleDateString() 
+         });
+      };
+
+      const handleSaveHistoryEdit = () => {
+         if (!editingHistoryItem) return;
+         const { record, studentId, historyIndex } = editingHistoryItem;
+         const student = safeStudents.find(s => s.id === studentId);
+         
+         if (student) {
+            const oldAmount = Number(record.amount) || 0;
+            const newAmount = parseInt(editHistoryForm.amount, 10);
+            if (isNaN(newAmount)) return;
+            
+            const diff = newAmount - oldAmount;
+            const newBalance = (student.balance || 0) + diff;
+
+            const newHistory = (student.history || []).map((h, index) => {
+               if (index === historyIndex) {
+                  return { 
+                     ...h, 
+                     reason: (editHistoryForm.reason || '').trim() || '無事由', 
+                     amount: newAmount,
+                     date: editHistoryForm.date || new Date().toLocaleDateString()
+                  };
+               }
+               return h;
+            });
+
+            setEditingHistoryItem(null);
+
+            updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', studentId), {
+               balance: newBalance,
+               history: newHistory
+            }).catch(err => console.error(err));
+         } else {
+            setEditingHistoryItem(null);
+         }
+      };
+
+      const requestDeleteHistory = (record, student, index) => {
+        if (!student) return;
+        setDeleteTarget({ 
+          type: 'history', 
+          id: record.id || `hist-${index}`, // 確保有 id 避免防呆機制阻擋
+          name: `交易紀錄: ${record.reason || '無事由'} ($${record.amount || 0})`, 
+          studentId: student.id, 
+          transactionId: record.id,
+          historyIndex: index,
+          amount: record.amount || 0
+        });
+      };
+
+      const handleRename = () => {
+        if (!renameTarget || !(renameTarget.newName || '').trim()) return;
+        const targetId = renameTarget.id;
+        const newName = renameTarget.newName.trim();
+        const newSeat = (renameTarget.newSeatNumber || '').trim();
+        const type = renameTarget.type;
+        
+        setRenameTarget(null);
+
+        if (type === 'student') {
+           updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetId), {
+             name: newName,
+             seatNumber: newSeat
+           }).catch(err => console.error(err));
+        } 
+      };
+
+      const openRenameStudent = (e, student) => {
+        e.stopPropagation();
+        if(!student) return;
+        setRenameTarget({ 
+          type: 'student', 
+          id: student.id, 
+          name: student.name, 
+          newName: student.name || '',
+          seatNumber: student.seatNumber || '',
+          newSeatNumber: student.seatNumber || ''
+        });
+      };
+
+      const requestDeleteStudent = (e, student) => {
+        e.stopPropagation();
+        if(!student) return;
+        setDeleteTarget({ type: 'student', id: student.id, name: student.name });
+      };
+
+      const toggleStudentSelection = (studentId) => {
+        setMultiSelectedIds(prev => prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]);
+      };
+      
+      const handleSelectAll = () => {
+        if (!filteredStudents) return;
+        if (multiSelectedIds.length === filteredStudents.length && filteredStudents.length > 0) {
+           setMultiSelectedIds([]);
+        } else {
+           setMultiSelectedIds(filteredStudents.map(s => s.id));
+        }
+      };
+
+      // 學生拖曳排序 (上下移動)
+      const moveStudent = (student, direction) => {
+        if (!student) return;
+        
+        // 只在當前篩選與排序後的列表中尋找相鄰的學生
+        const currentIndex = filteredStudents.findIndex(s => s.id === student.id);
+        const newIndex = currentIndex + direction;
+
+        if (newIndex < 0 || newIndex >= filteredStudents.length) return;
+
+        const targetStudent = filteredStudents[newIndex];
+        if (!targetStudent) return;
+        
+        const batch = writeBatch(db);
+        // 交換 order
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', student.id), { order: targetStudent.order ?? newIndex });
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetStudent.id), { order: student.order ?? currentIndex });
+        
+        batch.commit().catch(err => console.error("Move Student Error:", err));
+      };
+
+
+      const tasks = [
+        { id: 1, title: '家長簽名', points: 1, icon: FileText, color: 'border-blue-200', isVariable: false },
+        { id: 2, title: '準時上課', points: 1, icon: Clock, color: 'border-green-200', isVariable: false },
+        { id: 3, title: '備齊用品', points: 1, icon: Briefcase, color: 'border-purple-200', isVariable: false },
+        { id: 4, title: '繳交功課', points: '1~5', range: [1,2,3,4,5], icon: BookOpen, color: 'border-orange-200', isVariable: true },
+        { id: 5, title: '上課表現', points: '1~5', range: [1,2,3,4,5], icon: Smile, color: 'border-teal-200', isVariable: true },
+        { id: 6, title: isDeductMode ? '其他扣分' : '其他加分', points: '1~5', range: [1,2,3,4,5], icon: Star, color: 'border-pink-200', isVariable: true },
+      ];
+
+      return (
+        <div className="flex h-screen bg-amber-50 font-sans text-gray-800 overflow-hidden">
+          
+          {/* 行動版遮罩 (修正為完整閉合標籤避免編譯器誤判) */}
+          {isSidebarOpen && (
+            <div 
+              className="fixed inset-0 bg-black/20 z-20 md:hidden transition-opacity"
+              onClick={() => setIsSidebarOpen(false)}
+            ></div>
+          )}
+
+          {/* 左側選單 */}
+          <aside className={`
+            fixed md:relative z-30 w-64 h-full bg-white border-r border-amber-200 flex flex-col shadow-lg transition-transform duration-300
+            ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          `}>
+            <div className="p-4 bg-amber-400 text-white flex items-center justify-between shadow-md">
+              <div className="flex items-center">
+                <School className="mr-2" />
+                <h1 className="text-xl font-bold tracking-wider">鼓勵存摺</h1>
+              </div>
+              <button onClick={() => setIsSidebarOpen(false)} className="md:hidden">
+                <ArrowLeft size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {/* 商店按鈕 */}
+              <div className="mb-4">
+                <div className="text-xs font-bold text-gray-400 px-3 py-2 uppercase tracking-wider">功能頁面</div>
+                <button
+                  onClick={handleGoToStore}
+                  className={`w-full p-3 rounded-lg flex items-center justify-between transition-all ${
+                    viewMode === 'store_management'
+                      ? 'bg-purple-100 text-purple-900 font-bold border-l-4 border-purple-500' 
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <ShoppingBag size={18} className="mr-2 opacity-70" />
+                    鼓勵商店
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between px-3 py-2">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">我的班級</div>
+                <button 
+                  onClick={() => setIsManageClassesOpen(true)}
+                  className="text-gray-400 hover:text-amber-600 p-1 rounded hover:bg-amber-50 transition-colors"
+                  title="管理班級 (排序/改名)"
+                >
+                  <Settings size={14} /> 
+                  <span className="text-xs ml-1">管理</span>
+                </button>
+              </div>
+
+              {safeClasses.map(cls => (
+                <button
+                  key={cls.id}
+                  onClick={() => handleSwitchClass(cls.id)}
+                  className={`w-full p-3 rounded-lg flex items-center justify-between transition-all ${
+                    selectedClassId === cls.id && viewMode !== 'store_management'
+                      ? 'bg-amber-100 text-amber-900 font-bold border-l-4 border-amber-500' 
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center truncate">
+                    <LayoutGrid size={18} className="mr-2 opacity-70 shrink-0" />
+                    <span className="truncate">{cls.name || '未命名班級'}</span>
+                  </div>
+                </button>
+              ))}
+              
+              {/* 新增班級區塊 */}
+              {isAddClassOpen ? (
+                 <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 mt-2">
+                   <input 
+                     autoFocus
+                     className="w-full p-1 text-sm border rounded mb-2 outline-none focus:border-amber-400"
+                     placeholder="班級名稱"
+                     value={newClassName}
+                     onChange={e => setNewClassName(e.target.value)}
+                     onKeyDown={e => e.key === 'Enter' && handleAddClass()}
+                   />
+                   <div className="flex gap-1">
+                     <button onClick={handleAddClass} className="flex-1 bg-amber-500 text-white text-xs py-1 rounded font-bold">確定</button>
+                     <button onClick={() => setIsAddClassOpen(false)} className="flex-1 bg-gray-300 text-gray-700 text-xs py-1 rounded font-bold">取消</button>
+                   </div>
+                 </div>
+              ) : (
+                <button 
+                  onClick={() => setIsAddClassOpen(true)}
+                  className="w-full mt-2 p-2 text-sm text-gray-400 hover:text-amber-600 border border-dashed border-gray-300 hover:border-amber-400 rounded-lg flex items-center justify-center transition-colors"
+                >
+                  + 新增班級
+                </button>
+              )}
+            </div>
+            <div className="p-3 bg-gray-50 border-t text-xs text-gray-400 flex items-center justify-center gap-2 shrink-0">
+              <Database size={12} />
+              <span>資料自動同步中</span>
+            </div>
+          </aside>
+
+          {/* 右側主內容區 */}
+          <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+            <div className="md:hidden bg-white p-3 border-b flex items-center shadow-sm z-10 shrink-0">
+              <button onClick={() => setIsSidebarOpen(true)} className="mr-3 text-gray-600">
+                <MoreVertical size={24} className="rotate-90" />
+              </button>
+              <span className="font-bold text-lg text-gray-700 truncate">
+                {viewMode === 'store_management' ? '鼓勵商店' : (currentClass?.name || '請選擇班級')}
+              </span>
+            </div>
+
+            {viewMode === 'store_management' ? (
+              // =======================
+              // 商店管理頁面
+              // =======================
+              <div className="flex-1 overflow-y-auto bg-purple-50 p-4 md:p-6">
+                <div className="max-w-5xl mx-auto">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-purple-900 flex items-center">
+                        <ShoppingBag className="mr-2 shrink-0" /> 鼓勵商店
+                      </h2>
+                      <p className="text-purple-600 text-sm mt-1">管理可供學生兌換的獎品項目</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setIsManageCategoriesOpen(true)}
+                        className="bg-white border border-purple-200 text-purple-700 px-4 py-2 rounded-lg shadow-sm hover:bg-purple-50 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
+                      >
+                        <FolderEdit size={18} className="mr-2 shrink-0" /> 管理群組
+                      </button>
+                      <button 
+                        onClick={handleOpenAddReward}
+                        className="bg-purple-600 text-white px-4 py-2 rounded-lg shadow-md hover:bg-purple-700 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
+                      >
+                        <Plus size={18} className="mr-2 shrink-0" /> 新增獎品
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 新增獎品表單 */}
+                  {isAddRewardOpen && (
+                    <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-purple-200 animate-fadeIn">
+                      <h3 className="font-bold text-gray-700 mb-3">新增獎品</h3>
+                      <div className="flex flex-wrap gap-3 items-center">
+                        <input 
+                          autoFocus
+                          className="flex-1 min-w-[150px] p-2 border rounded-lg text-sm outline-none focus:border-purple-400"
+                          placeholder="獎品名稱 (例如: 免做家事券)"
+                          value={newRewardName}
+                          onChange={e => setNewRewardName(e.target.value)}
+                        />
+                        
+                        {/* 分類選擇 */}
+                        <div className="w-full md:w-40 relative">
+                           <select 
+                             className="w-full p-2 border rounded-lg text-sm bg-white cursor-pointer outline-none focus:border-purple-400"
+                             value={newRewardCategoryId}
+                             onChange={e => setNewRewardCategoryId(e.target.value)}
+                           >
+                             <option value="">(無群組)</option>
+                             {safeCategories.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                             ))}
+                           </select>
+                        </div>
+
+                        <input 
+                          type="number"
+                          className="w-full md:w-24 p-2 border rounded-lg text-sm outline-none focus:border-purple-400"
+                          placeholder="點數"
+                          value={newRewardCost}
+                          onChange={e => setNewRewardCost(e.target.value)}
+                        />
+                        <div className="flex gap-2 w-full md:w-auto">
+                          <button onClick={handleAddReward} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm font-bold">儲存</button>
+                          <button onClick={() => setIsAddRewardOpen(false)} className="flex-1 bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm font-bold">取消</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 分類過濾區 */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-2 scrollbar-hide">
+                    <Filter size={16} className="text-gray-400 shrink-0" />
+                    <button
+                      onClick={() => setSelectedCategoryId('all')}
+                      className={`px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${
+                        selectedCategoryId === 'all'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50 hover:text-purple-600'
+                      }`}
+                    >
+                      全部商品
+                    </button>
+                    {safeCategories.map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSelectedCategoryId(cat.id)}
+                        className={`px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${
+                          selectedCategoryId === cat.id
+                            ? 'bg-purple-600 text-white shadow-md'
+                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50 hover:text-purple-600'
+                        }`}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 獎品列表顯示區塊 */}
+                  {selectedCategoryId === 'all' ? (
+                    <div className="space-y-6">
+                       {/* 有群組的商品 */}
+                       {safeCategories.map(category => {
+                          const catRewards = displayedRewards.filter(r => r.categoryId === category.id);
+                          if (catRewards.length === 0) return null;
+                          return (
+                             <div key={category.id} className="bg-white p-4 rounded-xl shadow-sm border border-purple-100">
+                                <h3 className="font-bold text-lg text-purple-800 mb-3 flex items-center border-b border-purple-50 pb-2">
+                                   <Tags size={18} className="mr-2 text-purple-500" />
+                                   {category.name}
+                                </h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                                    {catRewards.map((item, index) => (
+                                       <RewardCard 
+                                         key={item.id} 
+                                         item={item} 
+                                         isManagementMode={true}
+                                         onEdit={(r) => setEditingReward(r)}
+                                         onDelete={() => setDeleteTarget({ type: 'reward', id: item.id, name: item.name })}
+                                         onMoveUp={(r) => moveReward(r, -1)}
+                                         onMoveDown={(r) => moveReward(r, 1)}
+                                         isFirst={index === 0}
+                                         isLast={index === catRewards.length - 1}
+                                       />
+                                    ))}
+                                </div>
+                             </div>
+                          )
+                       })}
+                       
+                       {/* 無群組的商品 */}
+                       {(() => {
+                          const noCatRewards = displayedRewards.filter(r => !r.categoryId);
+                          if (noCatRewards.length === 0) return null;
+                          return (
+                             <div className="bg-white/50 p-4 rounded-xl border border-dashed border-gray-300">
+                                <h3 className="font-bold text-sm text-gray-500 mb-3 flex items-center">
+                                   <span className="w-2 h-2 rounded-full bg-gray-400 mr-2"></span>
+                                   其他 (無群組)
+                                </h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                                    {noCatRewards.map((item, index) => (
+                                       <RewardCard 
+                                         key={item.id} 
+                                         item={item} 
+                                         isManagementMode={true}
+                                         onEdit={(r) => setEditingReward(r)}
+                                         onDelete={() => setDeleteTarget({ type: 'reward', id: item.id, name: item.name })}
+                                         onMoveUp={(r) => moveReward(r, -1)}
+                                         onMoveDown={(r) => moveReward(r, 1)}
+                                         isFirst={index === 0}
+                                         isLast={index === noCatRewards.length - 1}
+                                       />
+                                    ))}
+                                </div>
+                             </div>
+                          )
+                       })()}
+
+                       {displayedRewards.length === 0 && (
+                          <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+                            目前沒有獎品，點擊右上方「新增獎品」。
+                          </div>
+                       )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                      {displayedRewards.length === 0 ? (
+                        <div className="col-span-full text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+                          此分類目前沒有獎品。
+                        </div>
+                      ) : (
+                        displayedRewards.map((item, index) => (
+                            <RewardCard 
+                              key={item.id} 
+                              item={item} 
+                              isManagementMode={true}
+                              onEdit={(r) => setEditingReward(r)}
+                              onDelete={() => setDeleteTarget({ type: 'reward', id: item.id, name: item.name })}
+                              onMoveUp={(r) => moveReward(r, -1)}
+                              onMoveDown={(r) => moveReward(r, 1)}
+                              isFirst={index === 0}
+                              isLast={index === displayedRewards.length - 1}
+                            />
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : !selectedClassId ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
+                <School size={64} className="mb-4 text-amber-200" />
+                <h2 className="text-xl font-bold text-gray-600">歡迎使用鼓勵存摺</h2>
+                <p className="mt-2">請從左側選擇班級開始。</p>
+              </div>
+            ) : (
+              // =======================
+              // 班級/個人操作頁面
+              // =======================
+              <>
+                {/* 頂部操作面板 */}
+                <div className={`border-b shadow-sm z-10 flex-shrink-0 transition-colors duration-300 
+                  ${actionTab === 'redeem' ? 'bg-purple-50 border-purple-200' : 
+                    (isDeductMode ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-100')}`}>
+                  <div className="p-3 md:p-4"> 
+                    
+                    {/* 1. 標題與模式切換 */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-2 md:mb-3 gap-3">
+                      <div className="flex items-center gap-3 w-full md:w-auto overflow-hidden">
+                        {/* 返回按鈕 */}
+                        {viewMode === 'student_detail' && (
+                           <button onClick={handleBackToClass} className="mr-1 text-gray-500 hover:bg-white p-1 rounded-full transition-colors shrink-0"><ArrowLeft size={20}/></button>
+                        )}
+                        
+                        <div className="overflow-hidden">
+                           {viewMode === 'student_detail' ? (
+                              <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-baseline truncate">
+                                {selectedStudent?.seatNumber && <span className="text-sm text-gray-400 mr-1.5 font-mono">{selectedStudent.seatNumber}</span>}
+                                <span className="truncate">{selectedStudent?.name || '未命名'}</span>
+                                <span className="ml-2 text-sm font-normal text-gray-500 shrink-0">的存摺</span>
+                              </h2>
+                           ) : (
+                              <h2 className="text-lg md:text-2xl font-bold text-gray-800 flex items-center truncate">
+                                {currentClass?.name || '未命名班級'}
+                              </h2>
+                           )}
+                           
+                           {/* 選取狀態 */}
+                           <div className="flex items-center text-xs text-gray-500 mt-0.5">
+                              {viewMode === 'student_detail' 
+                                ? '個人操作模式' 
+                                : (multiSelectedIds.length > 0 
+                                    ? <span className="text-blue-600 font-bold bg-blue-100 px-2 py-0.5 rounded-full truncate">已選取 {multiSelectedIds.length} 位學生</span> 
+                                    : <span className="text-gray-400">請先選擇學生或點擊全選</span>)}
+                           </div>
+                        </div>
+                      </div>
+
+                      {/* 右側：模式切換 Tab */}
+                      <div className="flex bg-white rounded-lg p-1 shadow-sm border border-gray-200 shrink-0">
+                        <button 
+                          onClick={() => setActionTab('earn')}
+                          className={`px-3 py-1.5 rounded-md text-sm font-bold flex items-center transition-all ${actionTab === 'earn' ? 'bg-amber-100 text-amber-800 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >
+                          <Coins size={14} className="mr-2" /> 存錢/扣款
+                        </button>
+                        <button 
+                          onClick={() => setActionTab('redeem')}
+                          className={`px-3 py-1.5 rounded-md text-sm font-bold flex items-center transition-all ${actionTab === 'redeem' ? 'bg-purple-100 text-purple-800 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >
+                          <Gift size={14} className="mr-2" /> 兌換獎品
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 2. 操作區域 */}
+                    {actionTab === 'earn' ? (
+                      <div className="flex flex-col gap-3">
+                        {/* 控制列：包含搜尋、批次、自訂金額等 */}
+                        <div className="flex flex-wrap items-center gap-2">
+                           <button onClick={() => setIsDeductMode(!isDeductMode)} className={`flex items-center px-3 py-1.5 rounded-lg font-bold text-xs shadow-sm border transition-all ${isDeductMode ? 'bg-red-500 text-white border-red-600 hover:bg-red-600' : 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'}`}>
+                              {isDeductMode ? <AlertTriangle size={14} className="mr-1"/> : <PlusCircle size={14} className="mr-1"/>}
+                              {isDeductMode ? '扣款' : '加分'}
+                           </button>
+
+                           {/* 自訂金額 & 原因輸入 */}
+                           <div className={`flex items-center bg-white rounded-lg border overflow-hidden shadow-sm focus-within:ring-2 focus-within:ring-amber-300 h-8 ${isDeductMode ? 'border-red-300' : 'border-gray-300'}`}>
+                              <div className="flex items-center border-r border-gray-200 bg-gray-50 px-2 h-full w-20 md:w-28">
+                                <PenLine size={12} className="text-gray-400 mr-1 shrink-0"/>
+                                <input 
+                                  type="text"
+                                  placeholder="自訂事由"
+                                  className="w-full p-1 outline-none text-xs bg-transparent"
+                                  value={customReason}
+                                  onChange={(e) => setCustomReason(e.target.value)}
+                                />
+                              </div>
+
+                              <span className={`pl-2 text-xs font-mono ${isDeductMode ? 'text-red-500' : 'text-gray-400'}`}>$</span>
+                              <input 
+                                type="number"
+                                placeholder="金額"
+                                className="w-12 p-1 outline-none text-xs font-bold text-gray-700"
+                                value={customPoints}
+                                onChange={(e) => setCustomPoints(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleCustomPointsSubmit()}
+                              />
+                              <button 
+                                 onClick={handleCustomPointsSubmit}
+                                 className={`px-2 h-full text-white hover:opacity-90 transition-opacity ${isDeductMode ? 'bg-red-600' : 'bg-green-500'}`}
+                                 title="確認送出"
+                              >
+                                 <Send size={12} />
+                              </button>
+                           </div>
+
+                           <div className="flex-1 hidden md:block"></div>
+                           
+                           {/* 搜尋框與工具按鈕 */}
+                           {viewMode === 'class_dashboard' && (
+                             <>
+                               {/* 快速搜尋學生 */}
+                               <div className="flex items-center bg-white rounded-lg border border-gray-300 shadow-sm px-2 h-8 w-full md:w-auto mt-2 md:mt-0">
+                                 <Search size={14} className="text-gray-400 mr-1 shrink-0" />
+                                 <input
+                                   className="flex-1 w-32 md:w-48 outline-none text-xs bg-transparent"
+                                   placeholder="搜尋姓名/座號"
+                                   value={searchQuery}
+                                   onChange={e => setSearchQuery(e.target.value)}
+                                 />
+                                 {searchQuery && (
+                                   <button onClick={() => setSearchQuery('')} className="p-1 hover:bg-gray-100 rounded-full shrink-0">
+                                     <X size={12} className="text-gray-400"/>
+                                   </button>
+                                 )}
+                               </div>
+                               
+                               {/* 批次匯入按鈕 */}
+                               <button 
+                                 onClick={() => setIsBatchImportOpen(true)} 
+                                 className="p-1.5 text-blue-500 hover:bg-blue-50 border border-blue-200 bg-white rounded-lg shadow-sm flex items-center justify-center transition-colors" 
+                                 title="批次匯入學生名單"
+                               >
+                                 <ListPlus size={16}/>
+                               </button>
+                               
+                               <button onClick={exportToCSV} className="p-1.5 text-gray-500 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg shadow-sm shrink-0 transition-colors" title="匯出 CSV">
+                                 <Download size={16}/>
+                               </button>
+
+                               <button onClick={handleSelectAll} className="px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 text-xs shadow-sm whitespace-nowrap shrink-0 font-bold transition-colors">
+                                 {multiSelectedIds.length === filteredStudents.length && filteredStudents.length > 0 ? '取消全選' : '全選'}
+                               </button>
+                             </>
+                           )}
+                        </div>
+
+                        {/* 硬幣與任務區 */}
+                        <div className="flex flex-col lg:flex-row gap-2 md:gap-4">
+                          <div className={`flex-1 p-2 rounded-xl border shadow-sm flex items-center justify-around overflow-x-auto ${isDeductMode ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
+                            <Coin value={50} onClick={() => applyPoints(50, '零用金')} isDeduct={isDeductMode} />
+                            <Coin value={10} onClick={() => applyPoints(10, '零用金')} isDeduct={isDeductMode} />
+                            <Coin value={5} onClick={() => applyPoints(5, '零用金')} isDeduct={isDeductMode} />
+                            <Coin value={1} onClick={() => applyPoints(1, '零用金')} isDeduct={isDeductMode} />
+                          </div>
+                          <div className={`flex-[1.5] p-2 rounded-xl border shadow-sm overflow-x-auto ${isDeductMode ? 'bg-red-50 border-red-200' : 'bg-white border-blue-100'}`}>
+                            <div className="flex gap-2 min-w-max">
+                               {tasks.map(task => (
+                                <div key={task.id} className="w-20 md:w-24">
+                                  <TaskCard {...task} onClick={() => handleTaskAction(task)} isDeduct={isDeductMode}/>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      // --- 兌換獎品模式 ---
+                      <div className="flex flex-col gap-2">
+                         <div className="flex flex-wrap items-center justify-between gap-2">
+                           <div className="flex items-center gap-2 text-xs text-purple-700 bg-purple-100 p-2 rounded-lg">
+                              <ShoppingBag size={14} />
+                              <span>點擊下方獎品，將自動扣除選取學生的點數。</span>
+                           </div>
+                           
+                           <div className="flex items-center gap-1 overflow-x-auto max-w-full scrollbar-hide">
+                              <button
+                                onClick={() => setSelectedCategoryId('all')}
+                                className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
+                                  selectedCategoryId === 'all'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50'
+                                }`}
+                              >
+                                全部商品
+                              </button>
+                              {safeCategories.map(cat => (
+                                <button
+                                  key={cat.id}
+                                  onClick={() => setSelectedCategoryId(cat.id)}
+                                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
+                                    selectedCategoryId === cat.id
+                                      ? 'bg-purple-600 text-white'
+                                      : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50'
+                                  }`}
+                                >
+                                  {cat.name}
+                                </button>
+                              ))}
+                           </div>
+                         </div>
+
+                         {/* 兌換列表顯示區塊 */}
+                         {selectedCategoryId === 'all' ? (
+                            <div className="space-y-4 max-h-[160px] overflow-y-auto pr-2 pb-2">
+                               {safeCategories.map(category => {
+                                  const catRewards = displayedRewards.filter(r => r.categoryId === category.id);
+                                  if (catRewards.length === 0) return null;
+                                  return (
+                                     <div key={category.id} className="bg-white/50 p-2 rounded-xl">
+                                        <h4 className="text-xs font-bold text-purple-800 mb-2 flex items-center">
+                                          <Tags size={12} className="mr-1" /> {category.name}
+                                        </h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                            {catRewards.map(reward => (
+                                               <RewardCard 
+                                                  key={reward.id} 
+                                                  item={reward} 
+                                                  isManagementMode={false}
+                                                  onClick={() => handleRedeemRewardClick(reward)}
+                                               />
+                                            ))}
+                                        </div>
+                                     </div>
+                                  )
+                               })}
+                               
+                               {(() => {
+                                  const noCatRewards = displayedRewards.filter(r => !r.categoryId);
+                                  if (noCatRewards.length === 0) return null;
+                                  return (
+                                     <div className="bg-white/30 p-2 rounded-xl border border-dashed border-gray-200">
+                                        <h4 className="text-xs font-bold text-gray-500 mb-2 flex items-center">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-1"></span> 其他
+                                        </h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                            {noCatRewards.map(reward => (
+                                               <RewardCard 
+                                                  key={reward.id} 
+                                                  item={reward} 
+                                                  isManagementMode={false}
+                                                  onClick={() => handleRedeemRewardClick(reward)}
+                                               />
+                                            ))}
+                                        </div>
+                                     </div>
+                                  )
+                               })()}
+
+                               {displayedRewards.length === 0 && (
+                                  <div className="col-span-full text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl text-xs bg-white">
+                                     商店目前沒有獎品。
+                                  </div>
+                               )}
+                            </div>
+                         ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-[160px] overflow-y-auto pr-2">
+                               {displayedRewards.length === 0 ? (
+                                  <div className="col-span-full text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl text-xs bg-white">
+                                     此分類目前沒有獎品。
+                                  </div>
+                               ) : (
+                                  displayedRewards.map(reward => (
+                                     <RewardCard 
+                                        key={reward.id} 
+                                        item={reward} 
+                                        isManagementMode={false}
+                                        onClick={() => handleRedeemRewardClick(reward)}
+                                     />
+                                  ))
+                               )}
+                            </div>
+                         )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 學生卡片網格 */}
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-dot-pattern">
+                  {viewMode === 'student_detail' && selectedStudent ? (
+                    // --- 個人詳情檢視 ---
+                    <div className="max-w-4xl mx-auto space-y-6">
+                       <div className={`rounded-3xl p-6 text-white shadow-lg flex justify-between items-center relative overflow-hidden transition-colors duration-500 ${(selectedStudent.balance || 0) < 0 ? 'bg-gradient-to-r from-red-600 to-red-500' : 'bg-gradient-to-r from-green-600 to-green-500'}`}>
+                        <Coins size={120} className="absolute -right-6 -bottom-6 text-white opacity-20" />
+                        <div className="relative z-10">
+                          <p className="text-white/90 font-medium mb-1">目前累積存款</p>
+                          <p className="text-5xl font-mono font-bold tracking-tight">${selectedStudent.balance || 0}</p>
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col h-[500px]">
+                          <div className="p-4 border-b bg-gray-50 rounded-t-2xl flex justify-between items-center shrink-0">
+                             <h3 className="text-gray-600 font-bold">交易明細</h3>
+                             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">可點擊編輯或刪除</span>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-2">
+                            {(!selectedStudent.history || selectedStudent.history.length === 0) ? (
+                              <div className="h-full flex flex-col items-center justify-center text-gray-300">
+                                <BookOpen size={48} className="mb-2" />
+                                <p>尚無紀錄</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {(selectedStudent.history || []).map((record, i) => {
+                                  const amount = record?.amount || 0;
+                                  return (
+                                    <div key={record?.id || i} className="group flex justify-between items-center p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-100 transition-colors">
+                                      <div className="flex items-center flex-1 min-w-0 pr-4">
+                                        <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${amount < 0 ? 'bg-red-400' : 'bg-green-400'}`}></div>
+                                        <div className="truncate">
+                                          <p className="font-bold text-gray-700 text-sm truncate">{record?.reason || '無事由'}</p>
+                                          <p className="text-xs text-gray-400 font-mono">{record?.date || '-'}</p>
+                                        </div>
+                                      </div>
+                                      
+                                      <div className="flex items-center gap-3 shrink-0">
+                                        <span className={`font-bold font-mono text-lg ${amount < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                          {amount > 0 ? '+' : ''}{amount}
+                                        </span>
+                                        
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); openEditHistory(record, selectedStudent, i); }}
+                                            className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
+                                            title="編輯紀錄"
+                                          >
+                                            <Edit2 size={16} />
+                                          </button>
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); requestDeleteHistory(record, selectedStudent, i); }}
+                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                                            title="刪除紀錄"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                    </div>
+                  ) : (
+                    // --- 班級網格檢視 ---
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                      {filteredStudents.length === 0 && searchQuery ? (
+                         <div className="col-span-full text-center py-12 text-gray-400">
+                            找不到符合「{searchQuery}」的學生
+                         </div>
+                      ) : (
+                        filteredStudents.map((student, index) => {
+                          const isSelected = multiSelectedIds.includes(student.id);
+                          const isFirst = index === 0;
+                          const isLast = index === filteredStudents.length - 1;
+
+                          return (
+                            <div 
+                              key={student.id}
+                              onClick={() => toggleStudentSelection(student.id)}
+                              className={`
+                                group rounded-xl shadow-sm transition-all cursor-pointer relative overflow-hidden flex flex-col select-none
+                                ${isSelected 
+                                  ? 'bg-blue-50 border-2 border-blue-500 ring-2 ring-blue-100' 
+                                  : 'bg-white border-2 border-transparent hover:border-amber-300'
+                                }
+                              `}
+                            >
+                              {/* 座號顯示 */}
+                              {student.seatNumber && (
+                                <div className="absolute top-0 left-0 bg-gray-200 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-br-lg z-10">
+                                  {student.seatNumber}
+                                </div>
+                              )}
+
+                              {isSelected && (
+                                <div className="absolute top-2 right-2 text-blue-500 z-10 bg-white rounded-full">
+                                  <CheckCircle2 size={20} fill="currentColor" className="text-white" />
+                                </div>
+                              )}
+
+                              {/* 排序按鈕 (只有在沒選取且不是行動版才顯示，避免誤觸) */}
+                              {!isSelected && (
+                                <div className="absolute top-1 right-1 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                   <button 
+                                    onClick={(e) => { e.stopPropagation(); moveStudent(student, -1); }}
+                                    disabled={isFirst}
+                                    className="p-0.5 text-gray-400 hover:text-amber-600 hover:bg-amber-100 rounded disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                    title="往前移動"
+                                   >
+                                     <ChevronLeft size={16} className="rotate-90"/>
+                                   </button>
+                                   <button 
+                                    onClick={(e) => { e.stopPropagation(); moveStudent(student, 1); }}
+                                    disabled={isLast}
+                                    className="p-0.5 text-gray-400 hover:text-amber-600 hover:bg-amber-100 rounded disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                    title="往後移動"
+                                   >
+                                     <ChevronRight size={16} className="rotate-90"/>
+                                   </button>
+                                </div>
+                              )}
+
+                              <div className="p-4 flex flex-col items-center flex-1 mt-2">
+                                <div className={`w-14 h-14 rounded-full font-bold text-xl flex items-center justify-center mb-2 transition-colors ${isSelected ? 'bg-blue-200 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                                  {(student.name || '?').charAt(0)}
+                                </div>
+                                <h3 className="font-bold text-gray-800 text-base mb-1 w-full text-center truncate px-1">{student.name || '未命名'}</h3>
+                                <div className={`${(student.balance || 0) < 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'} font-mono font-bold text-lg px-2 py-0.5 rounded-lg mt-1`}>
+                                  ${student.balance || 0}
+                                </div>
+                              </div>
+                              <div className="border-t border-gray-100 flex divide-x divide-gray-100 bg-gray-50 shrink-0">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleSelectStudentDetail(student.id); }}
+                                  className="flex-1 py-2 text-xs text-gray-500 font-bold hover:bg-amber-100 hover:text-amber-700 transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <ExternalLink size={12} /> 詳情
+                                </button>
+                                
+                                <button 
+                                  onClick={(e) => openRenameStudent(e, student)}
+                                  className="px-3 py-2 text-gray-400 hover:bg-blue-100 hover:text-blue-500 transition-colors border-r border-gray-100"
+                                  title="編輯學生資料"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+
+                                <button 
+                                  onClick={(e) => requestDeleteStudent(e, student)}
+                                  className="px-3 py-2 text-gray-400 hover:bg-red-100 hover:text-red-500 transition-colors"
+                                  title="刪除"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                      
+                      {/* 單一新增學生卡片 */}
+                      {isAddStudentOpen && !searchQuery ? (
+                        <div className="bg-white rounded-xl shadow-sm border-2 border-dashed border-amber-300 p-4 flex flex-col justify-center gap-2">
+                          <div className="flex gap-2">
+                            <input className="w-1/3 p-2 border rounded-lg text-center text-sm outline-none focus:border-amber-400" placeholder="座號" value={newStudentSeat} onChange={e => setNewStudentSeat(e.target.value)} />
+                            <input autoFocus className="flex-1 p-2 border rounded-lg text-center font-bold outline-none focus:border-amber-400" placeholder="學生姓名" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddStudent()} />
+                          </div>
+                          <div className="flex gap-2 mt-1">
+                            <button onClick={handleAddStudent} className="flex-1 bg-amber-500 text-white py-1 rounded-lg text-sm font-bold">新增</button>
+                            <button onClick={() => setIsAddStudentOpen(false)} className="flex-1 bg-gray-200 text-gray-600 py-1 rounded-lg text-sm font-bold">取消</button>
+                          </div>
+                        </div>
+                      ) : currentClass && !searchQuery ? (
+                        <button onClick={() => setIsAddStudentOpen(true)} className="bg-gray-50 rounded-xl shadow-inner border-2 border-dashed border-gray-300 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-600 text-gray-400 transition-all flex flex-col items-center justify-center min-h-[140px]">
+                          <UserPlus size={28} className="mb-2" />
+                          <span className="font-bold text-sm">新增單一學生</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </main>
+
+          {/* Modal: 批次匯入學生 */}
+          {isBatchImportOpen && (
+             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg animate-fadeIn max-h-[90vh] flex flex-col">
+                 <div className="flex items-center mb-4 text-blue-600 shrink-0">
+                   <ListPlus size={24} className="mr-2" />
+                   <h3 className="text-xl font-bold text-gray-800">批次匯入學生名單</h3>
+                 </div>
+                 <p className="text-sm text-gray-500 mb-3 shrink-0">
+                   請直接貼上學生名單，每行一位。支援格式：<br/>
+                   <span className="font-mono bg-gray-100 px-1 rounded text-gray-700">1 王小明</span> 或純姓名 <span className="font-mono bg-gray-100 px-1 rounded text-gray-700">陳小華</span>
+                 </p>
+                 <textarea 
+                   autoFocus
+                   className="w-full p-3 border rounded-lg outline-none focus:border-blue-400 flex-1 min-h-[200px] resize-none text-sm"
+                   placeholder={`1 王小明\n2 陳小華\n3 張三`}
+                   value={batchInput}
+                   onChange={e => setBatchInput(e.target.value)}
+                 />
+                 <div className="flex gap-3 mt-4 shrink-0">
+                   <button 
+                     onClick={handleBatchImport}
+                     className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors"
+                   >
+                     確認匯入
+                   </button>
+                   <button 
+                     onClick={() => { setIsBatchImportOpen(false); setBatchInput(''); }}
+                     className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors"
+                   >
+                     取消
+                   </button>
+                 </div>
+               </div>
+             </div>
+          )}
+
+          {/* Modal: 變動分數 */}
+          {isModalOpen && currentTask && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+              <div className={`bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn border-t-8 max-h-[90vh] overflow-y-auto ${isDeductMode ? 'border-red-500' : 'border-amber-400'}`}>
+                <h3 className={`text-xl font-bold text-center mb-1 ${isDeductMode ? 'text-red-700' : 'text-gray-800'}`}>
+                  {currentTask.title} {isDeductMode ? '(扣分)' : '(加分)'}
+                </h3>
+                
+                <div className="mb-4 mt-2">
+                   <input 
+                     className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:border-amber-400 outline-none" 
+                     placeholder={`輸入${currentTask.title}原因 (選填，例如: 舉手發言)`}
+                     value={modalReason}
+                     onChange={e => setModalReason(e.target.value)}
+                     autoFocus
+                     onKeyDown={(e) => {
+                        if(e.key === 'Enter' && currentTask.points !== '1~5') {
+                            const reason = modalReason.trim() ? `${currentTask.title} - ${modalReason.trim()}` : currentTask.title;
+                            applyPoints(currentTask.points, reason); 
+                            setIsModalOpen(false); 
+                        }
+                     }}
+                   />
+                </div>
+
+                <p className="text-center text-gray-500 text-sm mb-4 font-bold">請選擇點數</p>
+                <div className="grid grid-cols-5 gap-3 mb-6">
+                  {currentTask.range.map(score => (
+                    <button
+                      key={score}
+                      onClick={() => { 
+                          const reason = modalReason.trim() ? `${currentTask.title} - ${modalReason.trim()}` : currentTask.title;
+                          applyPoints(score, reason); 
+                          setIsModalOpen(false); 
+                      }}
+                      className={`aspect-square rounded-xl border-2 font-bold text-2xl hover:text-white hover:scale-110 transition-all shadow-sm flex items-center justify-center ${isDeductMode ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-500 hover:border-red-500' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-500 hover:border-amber-500'}`}
+                    >
+                      {score}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setIsModalOpen(false)} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition-colors">取消</button>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 刪除確認 (通用) */}
+          {deleteTarget && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn border-l-8 border-red-500 max-h-[90vh] overflow-y-auto">
+                 <div className="flex items-center mb-4 text-red-600">
+                   <AlertTriangle size={32} className="mr-2 shrink-0" />
+                   <h3 className="text-xl font-bold">確認刪除</h3>
+                 </div>
+                 <p className="text-gray-600 mb-6 break-words">
+                   您確定要刪除 <span className="font-bold text-gray-800">{deleteTarget.name || '此項目'}</span> 嗎？<br/>
+                   {deleteTarget.type === 'history' ? (
+                       <span className="text-xs text-orange-500 mt-2 block font-bold">刪除後將自動回復該筆款項 (${deleteTarget.amount || 0}) 至餘額。</span>
+                   ) : deleteTarget.type === 'category' ? (
+                       <span className="text-xs text-orange-500 mt-2 block font-bold">群組刪除後，該群組內的商品將變為「無群組」，但不會被刪除。</span>
+                   ) : deleteTarget.type === 'class' ? (
+                       <span className="text-xs text-red-500 mt-2 block font-bold">警告：這會同時刪除該班級下所有的學生及明細紀錄！</span>
+                   ) : (
+                       <span className="text-xs text-red-400 mt-2 block">此動作無法復原，所有相關紀錄將被移除。</span>
+                   )}
+                 </p>
+                 <div className="flex gap-3">
+                   <button 
+                     onClick={confirmDelete}
+                     className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 transition-colors"
+                   >
+                     確認刪除
+                   </button>
+                   <button 
+                     onClick={() => setDeleteTarget(null)}
+                     className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors"
+                   >
+                     取消
+                   </button>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* Modal: 修改名稱與座號 (學生) */}
+          {renameTarget && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn max-h-[90vh] overflow-y-auto">
+                 <h3 className="text-xl font-bold mb-4 text-gray-800">編輯學生資料</h3>
+                 <div className="space-y-3 mb-6">
+                   <div>
+                     <label className="text-xs font-bold text-gray-500 uppercase block mb-1">座號</label>
+                     <input 
+                       className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
+                       value={renameTarget.newSeatNumber || ''}
+                       onChange={(e) => setRenameTarget({...renameTarget, newSeatNumber: e.target.value})}
+                       placeholder="選填"
+                     />
+                   </div>
+                   <div>
+                     <label className="text-xs font-bold text-gray-500 uppercase block mb-1">姓名</label>
+                     <input 
+                       autoFocus
+                       className="w-full p-2 border rounded-lg outline-none focus:border-blue-400 font-bold"
+                       value={renameTarget.newName || ''}
+                       onChange={(e) => setRenameTarget({...renameTarget, newName: e.target.value})}
+                       onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+                     />
+                   </div>
+                 </div>
+                 <div className="flex gap-3">
+                   <button 
+                     onClick={handleRename}
+                     className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors"
+                   >
+                     儲存
+                   </button>
+                   <button 
+                     onClick={() => setRenameTarget(null)}
+                     className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors"
+                   >
+                     取消
+                   </button>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* Modal: 修改交易紀錄 (歷史) */}
+          {editingHistoryItem && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn max-h-[90vh] overflow-y-auto">
+                 <div className="flex items-center mb-4 text-blue-600">
+                   <Edit2 size={24} className="mr-2" />
+                   <h3 className="text-xl font-bold text-gray-800">修改交易紀錄</h3>
+                 </div>
+                 
+                 <div className="space-y-3 mb-6">
+                    <div>
+                       <label className="text-xs font-bold text-gray-500 uppercase block mb-1">事由</label>
+                       <input 
+                         className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
+                         value={editHistoryForm.reason}
+                         onChange={(e) => setEditHistoryForm({...editHistoryForm, reason: e.target.value})}
+                       />
+                    </div>
+                    <div>
+                       <label className="text-xs font-bold text-gray-500 uppercase block mb-1">金額 (正數加分，負數扣分)</label>
+                       <input 
+                         type="number"
+                         className="w-full p-2 border rounded-lg font-mono font-bold outline-none focus:border-blue-400"
+                         value={editHistoryForm.amount}
+                         onChange={(e) => setEditHistoryForm({...editHistoryForm, amount: e.target.value})}
+                       />
+                    </div>
+                    <div>
+                       <label className="text-xs font-bold text-gray-500 uppercase block mb-1">日期</label>
+                       <input 
+                         className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
+                         value={editHistoryForm.date}
+                         onChange={(e) => setEditHistoryForm({...editHistoryForm, date: e.target.value})}
+                       />
+                    </div>
+                 </div>
+
+                 <div className="flex gap-3">
+                   <button 
+                     onClick={handleSaveHistoryEdit}
+                     className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors"
+                   >
+                     儲存變更
+                   </button>
+                   <button 
+                     onClick={() => setEditingHistoryItem(null)}
+                     className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors"
+                   >
+                     取消
+                   </button>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* Modal: 修改獎品 (商店) */}
+          {editingReward && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn max-h-[90vh] overflow-y-auto">
+                 <h3 className="text-xl font-bold mb-4 text-purple-900">修改獎品</h3>
+                 <div className="mb-4 space-y-3">
+                   <div>
+                     <label className="text-xs text-gray-500 font-bold uppercase mb-1 block">名稱</label>
+                     <input 
+                       autoFocus
+                       className="w-full p-2 border rounded-lg outline-none focus:border-purple-400"
+                       value={editingReward.name || ''}
+                       onChange={(e) => setEditingReward({...editingReward, name: e.target.value})}
+                     />
+                   </div>
+                   <div>
+                     <label className="text-xs text-gray-500 font-bold uppercase mb-1 block">分類群組</label>
+                     <select 
+                       className="w-full p-2 border rounded-lg bg-white cursor-pointer outline-none focus:border-purple-400"
+                       value={editingReward.categoryId || ''}
+                       onChange={e => setEditingReward({...editingReward, categoryId: e.target.value})}
+                     >
+                       <option value="">(無群組)</option>
+                       {safeCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                     </select>
+                   </div>
+                   <div>
+                     <label className="text-xs text-gray-500 font-bold uppercase mb-1 block">兌換點數</label>
+                     <input 
+                       type="number"
+                       className="w-full p-2 border rounded-lg outline-none focus:border-purple-400"
+                       value={editingReward.cost || 0}
+                       onChange={(e) => setEditingReward({...editingReward, cost: e.target.value})}
+                       onKeyDown={(e) => e.key === 'Enter' && handleUpdateReward()}
+                     />
+                   </div>
+                 </div>
+                 <div className="flex gap-3">
+                   <button 
+                     onClick={handleUpdateReward}
+                     className="flex-1 bg-purple-600 text-white py-2 rounded-lg font-bold hover:bg-purple-700 transition-colors"
+                   >
+                     儲存修改
+                   </button>
+                   <button 
+                     onClick={() => setEditingReward(null)}
+                     className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors"
+                   >
+                     取消
+                   </button>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* Modal: 管理商店群組 */}
+          {isManageCategoriesOpen && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[55] backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-fadeIn flex flex-col max-h-[85vh]">
+                <div className="p-4 border-b flex justify-between items-center bg-purple-50 rounded-t-2xl shrink-0">
+                  <h3 className="text-lg font-bold text-purple-900 flex items-center">
+                    <FolderEdit className="mr-2" size={20}/> 管理群組
+                  </h3>
+                  <button onClick={() => setIsManageCategoriesOpen(false)} className="text-purple-400 hover:text-purple-600">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                   <p className="text-sm text-gray-500 mb-2">修改群組名稱或調整顯示順序</p>
+                   
+                   {safeCategories.map((cat, index) => (
+                     <EditRow 
+                       key={cat.id}
+                       item={cat}
+                       index={index}
+                       total={safeCategories.length}
+                       onMove={moveCategory}
+                       onUpdateName={updateCategoryName}
+                       onDeleteRequest={requestDeleteCategory}
+                       placeholder="輸入群組名稱..."
+                     />
+                   ))}
+
+                   {safeCategories.length === 0 && !isAddCategoryOpen && (
+                     <div className="text-center py-6 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">目前沒有自訂群組</div>
+                   )}
+
+                   {isAddCategoryOpen ? (
+                      <div className="p-2 bg-purple-50 rounded-lg border border-purple-200 mt-4">
+                        <input 
+                          autoFocus
+                          className="w-full p-2 text-sm border rounded mb-2 outline-none focus:border-purple-400"
+                          placeholder="新群組名稱"
+                          value={newCategoryName}
+                          onChange={e => setNewCategoryName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                        />
+                        <div className="flex gap-1">
+                          <button onClick={handleAddCategory} className="flex-1 bg-purple-600 text-white text-xs py-1.5 rounded font-bold hover:bg-purple-700">確定</button>
+                          <button onClick={() => setIsAddCategoryOpen(false)} className="flex-1 bg-gray-300 text-gray-700 text-xs py-1.5 rounded font-bold hover:bg-gray-400">取消</button>
+                        </div>
+                      </div>
+                   ) : (
+                      <button 
+                        onClick={() => setIsAddCategoryOpen(true)}
+                        className="w-full mt-4 p-2 text-sm text-purple-500 hover:text-purple-700 border border-dashed border-purple-300 hover:border-purple-500 rounded-lg flex items-center justify-center transition-colors"
+                      >
+                        + 新增群組
+                      </button>
+                   )}
+                </div>
+
+                <div className="p-4 border-t bg-gray-50 rounded-b-2xl text-right shrink-0">
+                  <button 
+                    onClick={() => setIsManageCategoriesOpen(false)}
+                    className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 transition-colors"
+                  >
+                    完成
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 班級管理 (排序/改名/刪除) */}
+          {isManageClassesOpen && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[55] backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-fadeIn flex flex-col max-h-[85vh]">
+                <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl shrink-0">
+                  <h3 className="text-lg font-bold text-gray-800 flex items-center">
+                    <Settings className="mr-2" size={20}/> 班級管理
+                  </h3>
+                  <button onClick={() => setIsManageClassesOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                   <p className="text-sm text-gray-500 mb-2">可修改名稱或調整顯示順序</p>
+                   {safeClasses.map((cls, index) => (
+                     <EditRow 
+                       key={cls.id}
+                       item={cls}
+                       index={index}
+                       total={safeClasses.length}
+                       onMove={moveClass}
+                       onUpdateName={updateClassName}
+                       onDeleteRequest={requestDeleteClass}
+                       placeholder="輸入班級名稱..."
+                     />
+                   ))}
+
+                   {safeClasses.length === 0 && (
+                     <div className="text-center py-8 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">目前沒有班級</div>
+                   )}
+                </div>
+
+                <div className="p-4 border-t bg-gray-50 rounded-b-2xl text-right shrink-0">
+                  <button 
+                    onClick={() => setIsManageClassesOpen(false)}
+                    className="bg-amber-500 text-white px-6 py-2 rounded-lg font-bold hover:bg-amber-600 transition-colors"
+                  >
+                    完成
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 兌換確認 */}
+          {redeemConfirmTarget && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn border-t-8 border-purple-500">
+                <div className="flex items-center justify-center mb-4 text-purple-600">
+                   <Gift size={48} className="drop-shadow-sm" />
+                </div>
+                <h3 className="text-xl font-bold text-center mb-2 text-gray-800">確認兌換</h3>
+                <p className="text-center text-gray-600 mb-6">
+                  即將為選取的學生兌換<br/>
+                  <span className="font-bold text-purple-700 text-lg mt-2 inline-block px-3 py-1 bg-purple-50 rounded-lg">{redeemConfirmTarget.name}</span>
+                  <br/>
+                  <span className="text-sm mt-2 block font-bold text-gray-500">將扣除 <span className="text-red-500">${redeemConfirmTarget.cost}</span></span>
+                </p>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={confirmRedeem}
+                    className="flex-1 bg-purple-600 text-white py-2.5 rounded-xl font-bold hover:bg-purple-700 transition-colors shadow-sm"
+                  >
+                    確定兌換
+                  </button>
+                  <button 
+                    onClick={() => setRedeemConfirmTarget(null)}
+                    className="flex-1 bg-gray-100 text-gray-600 py-2.5 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 全域 Toast 提示 */}
+          {toast && (
+            <div className={`fixed top-10 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-lg font-bold text-sm animate-fadeIn flex items-center gap-2
+              ${toast.type === 'error' ? 'bg-red-600 text-white' : 
+                toast.type === 'warning' ? 'bg-amber-500 text-white' : 
+                toast.type === 'success' ? 'bg-green-500 text-white' : 
+                'bg-gray-800 text-white'}`
+            }>
+              {toast.type === 'error' && <AlertTriangle size={16} />}
+              {toast.type === 'warning' && <AlertTriangle size={16} />}
+              {toast.type === 'success' && <CheckCircle2 size={16} />}
+              {toast.msg}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 啟動 React 應用
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
