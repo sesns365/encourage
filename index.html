@@ -37,20 +37,20 @@
       School, Database, ArrowLeft, Trash2, MoreVertical, LayoutGrid, Download,
       MinusCircle, PlusCircle, CheckCircle2, ExternalLink, Gift, ShoppingBag, Plus,
       Send, AlertTriangle, X, Settings, Edit2, ChevronUp, ChevronDown, PenLine,
-      Tags, Filter, ChevronLeft, ChevronRight, FolderEdit, Search, ListPlus
+      Tags, Filter, ChevronLeft, ChevronRight, FolderEdit, Search, ListPlus, Store
     } = LucideIcons;
 
     // 引入 Firebase SDK
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
     import { 
-      getAuth, signInAnonymously, onAuthStateChanged 
+      getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
     } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { 
       getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, writeBatch
     } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
     // --- Firebase 初始化 ---
-    const firebaseConfig = {
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
       apiKey: "AIzaSyBXo1w7t0m628itmIc80yxbdWCXeQFSqzw",
       authDomain: "encourage-aac2a.firebaseapp.com",
       projectId: "encourage-aac2a",
@@ -61,7 +61,7 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    const appId = 'encourage-aac2a'; 
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'encourage-aac2a'; 
 
     // --- 輔助函式：判斷學生是否在班級內及獲取專屬座號 ---
     const isStudentInClass = (s, cId) => s.classId === cId || (s.classInfo && s.classInfo[cId] !== undefined);
@@ -283,6 +283,7 @@
       const [studentsData, setStudentsData] = useState([]);
       const [rewardsData, setRewardsData] = useState([]); 
       const [categoriesData, setCategoriesData] = useState([]); 
+      const [storesData, setStoresData] = useState([]); // 新增：商店分店資料
       
       // 視圖狀態： class_dashboard, store_management, student_management, student_detail
       const [selectedClassId, setSelectedClassId] = useState('');
@@ -308,11 +309,12 @@
       const [newStudentName, setNewStudentName] = useState('');
       const [newStudentSeat, setNewStudentSeat] = useState(''); 
       
-      // 新增：學生總表加入 Modal
+      // 學生總表加入 Modal
       const [isSelectExistingOpen, setIsSelectExistingOpen] = useState(false);
       const [existingSearch, setExistingSearch] = useState('');
       const [isAddGlobalStudentOpen, setIsAddGlobalStudentOpen] = useState(false);
       const [globalStudentName, setGlobalStudentName] = useState('');
+      const [globalStudentSeat, setGlobalStudentSeat] = useState(''); // 全域座號
 
       const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
       const [batchInput, setBatchInput] = useState('');
@@ -335,6 +337,12 @@
       const [isManageClassesOpen, setIsManageClassesOpen] = useState(false); 
       const [renameTarget, setRenameTarget] = useState(null); 
 
+      // 商店管理狀態
+      const [selectedStoreId, setSelectedStoreId] = useState('');
+      const [isManageStoresOpen, setIsManageStoresOpen] = useState(false);
+      const [isAddStoreOpen, setIsAddStoreOpen] = useState(false);
+      const [newStoreName, setNewStoreName] = useState('');
+
       const [editingHistoryItem, setEditingHistoryItem] = useState(null); 
       const [editHistoryForm, setEditHistoryForm] = useState({ reason: '', amount: 0, date: '' });
 
@@ -343,7 +351,11 @@
       useEffect(() => {
         const initAuth = async () => {
           try {
-            await signInAnonymously(auth);
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
           } catch (err) {
             console.error("Auth Init Error:", err);
             if (err.code === 'auth/operation-not-allowed') {
@@ -391,16 +403,33 @@
           setRewardsData(loadedRewards);
         }, (err) => console.error(err));
 
-        return () => { unsubClasses(); unsubStudents(); unsubCategories(); unsubRewards(); };
+        const unsubStores = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'stores')), (snapshot) => {
+          const loadedStores = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          loadedStores.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setStoresData(loadedStores);
+        }, (err) => console.error(err));
+
+        return () => { unsubClasses(); unsubStudents(); unsubCategories(); unsubRewards(); unsubStores(); };
       }, [user, selectedClassId, viewMode]);
 
       const safeClasses = (classesData || []).filter(c => c && c.id);
       const safeStudents = (studentsData || []).filter(s => s && s.id);
+      
+      // 商店安全過濾與預設值
+      let safeStores = (storesData || []).filter(s => s && s.id);
+      if (safeStores.length === 0) {
+          safeStores = [{ id: 'default', name: '預設商店', order: 0 }];
+      }
+      const activeStoreId = selectedStoreId && safeStores.find(s => s.id === selectedStoreId) ? selectedStoreId : safeStores[0].id;
+
       const safeCategories = (categoriesData || []).filter(c => c && c.id);
       const safeRewards = (rewardsData || []).filter(r => r && r.id);
 
-      const enhancedRewards = safeRewards.map(r => {
-        const cat = safeCategories.find(c => c.id === r.categoryId);
+      const storeCategories = safeCategories.filter(c => c.storeId === activeStoreId || (!c.storeId && activeStoreId === safeStores[0].id));
+      const storeRewards = safeRewards.filter(r => r.storeId === activeStoreId || (!r.storeId && activeStoreId === safeStores[0].id));
+
+      const enhancedRewards = storeRewards.map(r => {
+        const cat = storeCategories.find(c => c.id === r.categoryId);
         return { ...r, categoryName: cat ? cat.name : null };
       }).sort((a, b) => {
         const catIdA = String(a.categoryId || '');
@@ -416,7 +445,7 @@
 
       const currentClass = safeClasses.find(c => c.id === selectedClassId);
       
-      // 取得屬於目前班級的學生 (相容舊版結構與新版結構)
+      // 取得屬於目前班級的學生
       const classStudents = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
       const selectedStudent = safeStudents.find(s => s.id === selectedStudentId);
 
@@ -617,12 +646,13 @@
       const handleAddCategory = () => {
         if (!newCategoryName.trim() || !user) return;
         const newId = `cat${Date.now()}`;
-        const maxOrder = safeCategories.reduce((max, c) => Math.max(max, c.order || 0), 0);
+        const maxOrder = storeCategories.reduce((max, c) => Math.max(max, c.order || 0), 0);
         
         const catData = {
           id: newId,
           name: newCategoryName.trim(),
-          order: maxOrder + 1
+          order: maxOrder + 1,
+          storeId: activeStoreId
         };
 
         setNewCategoryName('');
@@ -660,7 +690,7 @@
       const handleOpenAddReward = () => {
         setNewRewardName('');
         setNewRewardCost('');
-        setNewRewardCategoryId(selectedCategoryId === 'all' ? (safeCategories.length > 0 ? safeCategories[0].id : '') : selectedCategoryId);
+        setNewRewardCategoryId(selectedCategoryId === 'all' ? (storeCategories.length > 0 ? storeCategories[0].id : '') : selectedCategoryId);
         setIsAddRewardOpen(true);
       };
 
@@ -670,7 +700,7 @@
         if (isNaN(cost) || cost < 0) return;
 
         const newId = `r${Date.now()}`;
-        const catRewards = safeRewards.filter(r => r.categoryId === newRewardCategoryId);
+        const catRewards = storeRewards.filter(r => r.categoryId === newRewardCategoryId);
         const maxOrder = catRewards.reduce((max, r) => Math.max(max, r.order || 0), 0);
 
         const rewardData = {
@@ -678,7 +708,8 @@
           name: newRewardName.trim(),
           cost: cost,
           categoryId: newRewardCategoryId || null, 
-          order: maxOrder + 1
+          order: maxOrder + 1,
+          storeId: activeStoreId
         };
 
         setNewRewardName('');
@@ -752,7 +783,17 @@
 
         setDeleteTarget(null);
 
-        if (type === 'student_from_class') {
+        if (type === 'store') {
+           if (id !== 'default') {
+               batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'stores', id));
+           }
+           if (selectedStoreId === id) setSelectedStoreId('');
+           const storeCategoriesToDelete = safeCategories.filter(c => c.storeId === id || (!c.storeId && id === 'default'));
+           storeCategoriesToDelete.forEach(c => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'categories', c.id)));
+           const storeRewardsToDelete = safeRewards.filter(r => r.storeId === id || (!r.storeId && id === 'default'));
+           storeRewardsToDelete.forEach(r => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', r.id)));
+           showToast("已刪除商店及相關獎品", "success");
+        } else if (type === 'student_from_class') {
            const student = safeStudents.find(s => s.id === id);
            if (student) {
              const newClassInfo = { ...(student.classInfo || {}) };
@@ -810,17 +851,64 @@
         batch.commit().catch(err => console.error("Delete Error", err));
       };
 
+      const handleAddStore = () => {
+        if (!newStoreName.trim() || !user) return;
+        const newId = `store${Date.now()}`;
+        const maxOrder = safeStores.reduce((max, s) => Math.max(max, s.order || 0), 0);
+        const storeData = { id: newId, name: newStoreName.trim(), order: maxOrder + 1 };
+        
+        setNewStoreName('');
+        setIsAddStoreOpen(false);
+        setSelectedStoreId(newId);
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stores', newId), storeData).catch(console.error);
+      };
+
+      const updateStoreName = (id, newName) => {
+        if (!id) return;
+        if (id === 'default') {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stores', 'default'), { id: 'default', name: newName, order: 0 });
+        } else {
+            updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stores', id), { name: newName });
+        }
+      };
+
+      const moveStore = (index, direction) => {
+        const newIndex = index + direction;
+        if (newIndex < 0 || newIndex >= safeStores.length) return;
+        const storeA = safeStores[index];
+        const storeB = safeStores[newIndex];
+        
+        const batch = writeBatch(db);
+        const updateStoreDoc = (st, order) => {
+            if (st.id === 'default') {
+                batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'stores', 'default'), { id: 'default', name: st.name, order });
+            } else {
+                batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'stores', st.id), { order });
+            }
+        };
+        updateStoreDoc(storeA, storeB.order ?? newIndex);
+        updateStoreDoc(storeB, storeA.order ?? index);
+        batch.commit().catch(console.error);
+      };
+
+      const requestDeleteStore = (store) => {
+        if (!store) return;
+        setDeleteTarget({ type: 'store', id: store.id, name: store.name });
+      };
+
       const handleCreateGlobalStudent = () => {
          if (!globalStudentName.trim() || !user) return;
          const newId = `s${Date.now()}`;
          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', newId), {
              id: newId, 
              name: globalStudentName.trim(), 
+             seatNumber: globalStudentSeat.trim(),
              balance: 0, 
              classInfo: {}, 
              history: [{ id: Date.now(), date: new Date().toLocaleDateString(), reason: '開戶', amount: 0 }]
          }).then(() => {
              setGlobalStudentName('');
+             setGlobalStudentSeat('');
              setIsAddGlobalStudentOpen(false);
              showToast("已建立學生", "success");
          }).catch(err => console.error(err));
@@ -1064,7 +1152,8 @@
            }).then(() => setRenameTarget(null)).catch(err => console.error(err));
         } else if (type === 'student_global') {
            updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetId), {
-             name: newName
+             name: newName,
+             seatNumber: (renameTarget.newSeatNumber || '').trim()
            }).then(() => setRenameTarget(null)).catch(err => console.error(err));
         }
       };
@@ -1077,8 +1166,8 @@
           id: student.id, 
           name: student.name, 
           newName: student.name || '',
-          seatNumber: isGlobal ? '' : getStudentSeat(student, selectedClassId),
-          newSeatNumber: isGlobal ? '' : getStudentSeat(student, selectedClassId),
+          seatNumber: isGlobal ? (student.seatNumber || '') : getStudentSeat(student, selectedClassId),
+          newSeatNumber: isGlobal ? (student.seatNumber || '') : getStudentSeat(student, selectedClassId),
           classId: selectedClassId
         });
       };
@@ -1320,6 +1409,12 @@
                        <h3 className="font-bold text-gray-700 mb-3">新增學生至總表</h3>
                        <div className="flex gap-2">
                           <input 
+                            className="w-24 p-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                            placeholder="座號(選填)"
+                            value={globalStudentSeat}
+                            onChange={e => setGlobalStudentSeat(e.target.value)}
+                          />
+                          <input 
                             autoFocus
                             className="flex-1 p-2 border rounded-lg text-sm outline-none focus:border-blue-400"
                             placeholder="學生姓名"
@@ -1336,8 +1431,9 @@
                   <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
                      {/* Table header (hidden on mobile) */}
                      <div className="hidden md:grid grid-cols-12 gap-4 p-4 bg-blue-50 border-b font-bold text-gray-600 text-sm">
-                        <div className="col-span-3">姓名</div>
-                        <div className="col-span-3">總點數</div>
+                        <div className="col-span-2">座號</div>
+                        <div className="col-span-2">姓名</div>
+                        <div className="col-span-2">總點數</div>
                         <div className="col-span-4">所屬班級</div>
                         <div className="col-span-2 text-right">操作</div>
                      </div>
@@ -1345,11 +1441,14 @@
                         {safeStudents.length === 0 && <div className="p-8 text-center text-gray-400">目前總表中沒有學生</div>}
                         {safeStudents.map(student => (
                            <div key={student.id} className="flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 md:items-center hover:bg-blue-50/50 transition-colors">
-                              <div className="md:col-span-3 font-bold text-gray-800 text-lg md:text-base flex justify-between items-center">
-                                  {student.name}
+                              <div className="hidden md:block md:col-span-2 font-mono text-gray-500 text-sm">
+                                  {student.seatNumber || '-'}
+                              </div>
+                              <div className="md:col-span-2 font-bold text-gray-800 text-lg md:text-base flex justify-between items-center">
+                                  <span><span className="md:hidden text-gray-400 font-normal mr-2">{student.seatNumber || '-'}</span>{student.name}</span>
                                   <div className="md:hidden font-mono font-bold text-green-600">${student.balance || 0}</div>
                               </div>
-                              <div className="hidden md:block md:col-span-3 font-mono font-bold text-green-600">${student.balance || 0}</div>
+                              <div className="hidden md:block md:col-span-2 font-mono font-bold text-green-600">${student.balance || 0}</div>
                               <div className="md:col-span-4 flex flex-wrap gap-1">
                                  {safeClasses.filter(c => isStudentInClass(student, c.id)).map(c => (
                                     <span key={c.id} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded border">
@@ -1377,7 +1476,7 @@
               // =======================
               <div className="flex-1 overflow-y-auto bg-purple-50 p-4 md:p-6">
                 <div className="max-w-5xl mx-auto">
-                  <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between mb-4 gap-4">
                     <div>
                       <h2 className="text-2xl font-bold text-purple-900 flex items-center">
                         <ShoppingBag className="mr-2 shrink-0" /> 鼓勵商店
@@ -1385,6 +1484,12 @@
                       <p className="text-purple-600 text-sm mt-1">管理可供學生兌換的獎品項目</p>
                     </div>
                     <div className="flex gap-2">
+                      <button 
+                        onClick={() => setIsManageStoresOpen(true)}
+                        className="bg-white border border-purple-200 text-purple-700 px-4 py-2 rounded-lg shadow-sm hover:bg-purple-50 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
+                      >
+                        <Store size={18} className="mr-2 shrink-0" /> 管理分店
+                      </button>
                       <button 
                         onClick={() => setIsManageCategoriesOpen(true)}
                         className="bg-white border border-purple-200 text-purple-700 px-4 py-2 rounded-lg shadow-sm hover:bg-purple-50 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
@@ -1398,6 +1503,22 @@
                         <Plus size={18} className="mr-2 shrink-0" /> 新增獎品
                       </button>
                     </div>
+                  </div>
+
+                  {/* 商店分店 Tabs */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-2 border-b border-purple-200 scrollbar-hide">
+                    <span className="text-sm font-bold text-purple-800 shrink-0 mr-2">分店：</span>
+                    {safeStores.map(store => (
+                       <button
+                         key={store.id}
+                         onClick={() => { setSelectedStoreId(store.id); setSelectedCategoryId('all'); }}
+                         className={`px-4 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${
+                           activeStoreId === store.id ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-purple-600 border border-purple-200 hover:bg-purple-50'
+                         }`}
+                       >
+                         <Store size={16} className="inline-block mr-1"/>{store.name}
+                       </button>
+                    ))}
                   </div>
 
                   {/* 新增獎品表單 */}
@@ -1420,7 +1541,7 @@
                              onChange={e => setNewRewardCategoryId(e.target.value)}
                            >
                              <option value="">(無群組)</option>
-                             {safeCategories.map(c => (
+                             {storeCategories.map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                              ))}
                            </select>
@@ -1442,7 +1563,7 @@
                   )}
 
                   {/* 分類過濾區 */}
-                  <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-2 scrollbar-hide">
+                  <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-2 scrollbar-hide mt-4">
                     <Filter size={16} className="text-gray-400 shrink-0" />
                     <button
                       onClick={() => setSelectedCategoryId('all')}
@@ -1454,7 +1575,7 @@
                     >
                       全部商品
                     </button>
-                    {safeCategories.map(cat => (
+                    {storeCategories.map(cat => (
                       <button
                         key={cat.id}
                         onClick={() => setSelectedCategoryId(cat.id)}
@@ -1473,7 +1594,7 @@
                   {selectedCategoryId === 'all' ? (
                     <div className="space-y-6">
                        {/* 有群組的商品 */}
-                       {safeCategories.map(category => {
+                       {storeCategories.map(category => {
                           const catRewards = displayedRewards.filter(r => r.categoryId === category.id);
                           if (catRewards.length === 0) return null;
                           return (
@@ -1731,43 +1852,59 @@
                     ) : (
                       // --- 兌換獎品模式 ---
                       <div className="flex flex-col gap-2">
-                         <div className="flex flex-wrap items-center justify-between gap-2">
+                         <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                            <div className="flex items-center gap-2 text-xs text-purple-700 bg-purple-100 p-2 rounded-lg">
                               <ShoppingBag size={14} />
                               <span>點擊下方獎品，將自動扣除選取學生的點數。</span>
                            </div>
-                           
-                           <div className="flex items-center gap-1 overflow-x-auto max-w-full scrollbar-hide">
+                         </div>
+                         
+                         {/* 商店選擇器 */}
+                         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-purple-100 overflow-x-auto scrollbar-hide">
+                            <span className="text-xs font-bold text-purple-600 shrink-0">選擇分店：</span>
+                            {safeStores.map(store => (
+                               <button
+                                 key={store.id}
+                                 onClick={() => { setSelectedStoreId(store.id); setSelectedCategoryId('all'); }}
+                                 className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
+                                   activeStoreId === store.id ? 'bg-purple-600 text-white shadow-sm' : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
+                                 }`}
+                               >
+                                 <Store size={12} className="inline-block mr-1"/>{store.name}
+                               </button>
+                            ))}
+                         </div>
+                         
+                         <div className="flex items-center gap-1 overflow-x-auto max-w-full scrollbar-hide mb-2">
+                            <button
+                              onClick={() => setSelectedCategoryId('all')}
+                              className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
+                                selectedCategoryId === 'all'
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50'
+                              }`}
+                            >
+                              全部商品
+                            </button>
+                            {storeCategories.map(cat => (
                               <button
-                                onClick={() => setSelectedCategoryId('all')}
+                                key={cat.id}
+                                onClick={() => setSelectedCategoryId(cat.id)}
                                 className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
-                                  selectedCategoryId === 'all'
+                                  selectedCategoryId === cat.id
                                     ? 'bg-purple-600 text-white'
                                     : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50'
                                 }`}
                               >
-                                全部商品
+                                {cat.name}
                               </button>
-                              {safeCategories.map(cat => (
-                                <button
-                                  key={cat.id}
-                                  onClick={() => setSelectedCategoryId(cat.id)}
-                                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition-colors ${
-                                    selectedCategoryId === cat.id
-                                      ? 'bg-purple-600 text-white'
-                                      : 'bg-white text-gray-600 border border-gray-200 hover:bg-purple-50'
-                                  }`}
-                                >
-                                  {cat.name}
-                                </button>
-                              ))}
-                           </div>
+                            ))}
                          </div>
 
                          {/* 兌換列表顯示區塊 */}
                          {selectedCategoryId === 'all' ? (
                             <div className="space-y-4 max-h-[160px] overflow-y-auto pr-2 pb-2">
-                               {safeCategories.map(category => {
+                               {storeCategories.map(category => {
                                   const catRewards = displayedRewards.filter(r => r.categoryId === category.id);
                                   if (catRewards.length === 0) return null;
                                   return (
@@ -2178,6 +2315,8 @@
                        <span className="text-xs text-orange-500 mt-2 block font-bold">刪除後將自動回復該筆款項 (${deleteTarget.amount || 0}) 至餘額。</span>
                    ) : deleteTarget.type === 'category' ? (
                        <span className="text-xs text-orange-500 mt-2 block font-bold">群組刪除後，該群組內的商品將變為「無群組」，但不會被刪除。</span>
+                   ) : deleteTarget.type === 'store' ? (
+                       <span className="text-xs text-red-500 mt-2 block font-bold">警告：這會一併刪除該店內的所有群組與獎品！</span>
                    ) : deleteTarget.type === 'class' ? (
                        <span className="text-xs text-red-500 mt-2 block font-bold">警告：班級刪除後，學生將被移出該班級，但總表點數不受影響。</span>
                    ) : deleteTarget.type === 'student_from_class' ? (
@@ -2211,12 +2350,23 @@
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
                <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn max-h-[90vh] overflow-y-auto">
                  <h3 className="text-xl font-bold mb-4 text-gray-800">
-                    {renameTarget.type === 'student_global' ? '編輯學生姓名' : '編輯學生資料'}
+                    {renameTarget.type === 'student_global' ? '編輯學生姓名與座號' : '編輯學生資料'}
                  </h3>
                  <div className="space-y-3 mb-6">
                    {renameTarget.type === 'student_from_class' && (
                      <div>
                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">本班專屬座號</label>
+                       <input 
+                         className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
+                         value={renameTarget.newSeatNumber || ''}
+                         onChange={(e) => setRenameTarget({...renameTarget, newSeatNumber: e.target.value})}
+                         placeholder="選填"
+                       />
+                     </div>
+                   )}
+                   {renameTarget.type === 'student_global' && (
+                     <div>
+                       <label className="text-xs font-bold text-gray-500 uppercase block mb-1">全域座號</label>
                        <input 
                          className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
                          value={renameTarget.newSeatNumber || ''}
@@ -2332,7 +2482,7 @@
                        onChange={e => setEditingReward({...editingReward, categoryId: e.target.value})}
                      >
                        <option value="">(無群組)</option>
-                       {safeCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                       {storeCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                      </select>
                    </div>
                    <div>
@@ -2370,7 +2520,7 @@
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-fadeIn flex flex-col max-h-[85vh]">
                 <div className="p-4 border-b flex justify-between items-center bg-purple-50 rounded-t-2xl shrink-0">
                   <h3 className="text-lg font-bold text-purple-900 flex items-center">
-                    <FolderEdit className="mr-2" size={20}/> 管理群組
+                    <FolderEdit className="mr-2" size={20}/> 管理群組 <span className="text-xs bg-purple-200 text-purple-700 ml-2 px-2 py-0.5 rounded-full">{safeStores.find(s => s.id === activeStoreId)?.name}</span>
                   </h3>
                   <button onClick={() => setIsManageCategoriesOpen(false)} className="text-purple-400 hover:text-purple-600">
                     <X size={24} />
@@ -2380,12 +2530,12 @@
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
                    <p className="text-sm text-gray-500 mb-2">修改群組名稱或調整顯示順序</p>
                    
-                   {safeCategories.map((cat, index) => (
+                   {storeCategories.map((cat, index) => (
                      <EditRow 
                        key={cat.id}
                        item={cat}
                        index={index}
-                       total={safeCategories.length}
+                       total={storeCategories.length}
                        onMove={moveCategory}
                        onUpdateName={updateCategoryName}
                        onDeleteRequest={requestDeleteCategory}
@@ -2393,7 +2543,7 @@
                      />
                    ))}
 
-                   {safeCategories.length === 0 && !isAddCategoryOpen && (
+                   {storeCategories.length === 0 && !isAddCategoryOpen && (
                      <div className="text-center py-6 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">目前沒有自訂群組</div>
                    )}
 
@@ -2425,6 +2575,71 @@
                 <div className="p-4 border-t bg-gray-50 rounded-b-2xl text-right shrink-0">
                   <button 
                     onClick={() => setIsManageCategoriesOpen(false)}
+                    className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 transition-colors"
+                  >
+                    完成
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: 管理商店分店 */}
+          {isManageStoresOpen && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[55] backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-fadeIn flex flex-col max-h-[85vh]">
+                <div className="p-4 border-b flex justify-between items-center bg-purple-50 rounded-t-2xl shrink-0">
+                  <h3 className="text-lg font-bold text-purple-900 flex items-center">
+                    <Store className="mr-2" size={20}/> 管理分店
+                  </h3>
+                  <button onClick={() => setIsManageStoresOpen(false)} className="text-purple-400 hover:text-purple-600">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                   <p className="text-sm text-gray-500 mb-2">新增、修改分店名稱或調整顯示順序</p>
+                   {safeStores.map((store, index) => (
+                     <EditRow 
+                       key={store.id}
+                       item={store}
+                       index={index}
+                       total={safeStores.length}
+                       onMove={moveStore}
+                       onUpdateName={updateStoreName}
+                       onDeleteRequest={requestDeleteStore}
+                       placeholder="輸入分店名稱..."
+                     />
+                   ))}
+
+                   {isAddStoreOpen ? (
+                      <div className="p-2 bg-purple-50 rounded-lg border border-purple-200 mt-4">
+                        <input 
+                          autoFocus
+                          className="w-full p-2 text-sm border rounded mb-2 outline-none focus:border-purple-400"
+                          placeholder="新分店名稱"
+                          value={newStoreName}
+                          onChange={e => setNewStoreName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddStore()}
+                        />
+                        <div className="flex gap-1">
+                          <button onClick={handleAddStore} className="flex-1 bg-purple-600 text-white text-xs py-1.5 rounded font-bold hover:bg-purple-700">確定</button>
+                          <button onClick={() => setIsAddStoreOpen(false)} className="flex-1 bg-gray-300 text-gray-700 text-xs py-1.5 rounded font-bold hover:bg-gray-400">取消</button>
+                        </div>
+                      </div>
+                   ) : (
+                      <button 
+                        onClick={() => setIsAddStoreOpen(true)}
+                        className="w-full mt-4 p-2 text-sm text-purple-500 hover:text-purple-700 border border-dashed border-purple-300 hover:border-purple-500 rounded-lg flex items-center justify-center transition-colors"
+                      >
+                        + 新增分店
+                      </button>
+                   )}
+                </div>
+
+                <div className="p-4 border-t bg-gray-50 rounded-b-2xl text-right shrink-0">
+                  <button 
+                    onClick={() => setIsManageStoresOpen(false)}
                     className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 transition-colors"
                   >
                     完成
