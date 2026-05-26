@@ -61,7 +61,12 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    const appId = 'encourage-aac2a'; // 固定使用您的專案 ID 作為 appId
+    const appId = 'encourage-aac2a'; 
+
+    // --- 輔助函式：判斷學生是否在班級內及獲取專屬座號 ---
+    const isStudentInClass = (s, cId) => s.classId === cId || (s.classInfo && s.classInfo[cId] !== undefined);
+    const getStudentSeat = (s, cId) => s.classInfo?.[cId]?.seatNumber ?? (s.classId === cId ? s.seatNumber : '');
+    const getStudentOrder = (s, cId) => s.classInfo?.[cId]?.order ?? (s.classId === cId ? s.order : 0);
 
     // --- 組件：擬真硬幣 ---
     const Coin = ({ value, onClick, label, isDeduct }) => {
@@ -206,7 +211,7 @@
       );
     };
 
-    // --- 組件：通用編輯列 (極致防呆機制) ---
+    // --- 組件：通用編輯列 ---
     const EditRow = ({ item, index, total, onMove, onUpdateName, onDeleteRequest, placeholder }) => {
       const [localName, setLocalName] = useState(item?.name || '');
 
@@ -272,41 +277,43 @@
     };
 
     function App() {
-      // --- 狀態管理 ---
       const [user, setUser] = useState(null);
       
-      // 資料庫原始資料狀態 
       const [classesData, setClassesData] = useState([]);
       const [studentsData, setStudentsData] = useState([]);
       const [rewardsData, setRewardsData] = useState([]); 
       const [categoriesData, setCategoriesData] = useState([]); 
       
-      // 視圖狀態
+      // 視圖狀態： class_dashboard, store_management, student_management, student_detail
       const [selectedClassId, setSelectedClassId] = useState('');
       const [viewMode, setViewMode] = useState('class_dashboard'); 
       const [selectedStudentId, setSelectedStudentId] = useState('');
+      const [previousViewMode, setPreviousViewMode] = useState('class_dashboard');
 
-      // 搜尋與篩選狀態
       const [searchQuery, setSearchQuery] = useState('');
 
-      // 功能狀態
       const [isDeductMode, setIsDeductMode] = useState(false); 
       const [multiSelectedIds, setMultiSelectedIds] = useState([]); 
       const [actionTab, setActionTab] = useState('earn'); 
       const [customPoints, setCustomPoints] = useState('');
       const [customReason, setCustomReason] = useState(''); 
 
-      // UI 狀態
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [currentTask, setCurrentTask] = useState(null);
       const [modalReason, setModalReason] = useState(''); 
-      const [toast, setToast] = useState(null); // 新增 Toast 狀態
-      const [redeemConfirmTarget, setRedeemConfirmTarget] = useState(null); // 新增兌換確認目標
+      const [toast, setToast] = useState(null); 
+      const [redeemConfirmTarget, setRedeemConfirmTarget] = useState(null); 
       
       const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
       const [newStudentName, setNewStudentName] = useState('');
-      const [newStudentSeat, setNewStudentSeat] = useState(''); // 座號
+      const [newStudentSeat, setNewStudentSeat] = useState(''); 
       
+      // 新增：學生總表加入 Modal
+      const [isSelectExistingOpen, setIsSelectExistingOpen] = useState(false);
+      const [existingSearch, setExistingSearch] = useState('');
+      const [isAddGlobalStudentOpen, setIsAddGlobalStudentOpen] = useState(false);
+      const [globalStudentName, setGlobalStudentName] = useState('');
+
       const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
       const [batchInput, setBatchInput] = useState('');
 
@@ -314,14 +321,12 @@
       const [newClassName, setNewClassName] = useState('');
       const [isSidebarOpen, setIsSidebarOpen] = useState(true);
       
-      // 商店與管理 UI 狀態
       const [isAddRewardOpen, setIsAddRewardOpen] = useState(false);
       const [newRewardName, setNewRewardName] = useState('');
       const [newRewardCost, setNewRewardCost] = useState('');
       const [newRewardCategoryId, setNewRewardCategoryId] = useState(''); 
       const [editingReward, setEditingReward] = useState(null);
       
-      // 商店分類狀態
       const [selectedCategoryId, setSelectedCategoryId] = useState('all'); 
       const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false); 
       const [newCategoryName, setNewCategoryName] = useState('');
@@ -330,21 +335,17 @@
       const [isManageClassesOpen, setIsManageClassesOpen] = useState(false); 
       const [renameTarget, setRenameTarget] = useState(null); 
 
-      // 交易明細編輯狀態
       const [editingHistoryItem, setEditingHistoryItem] = useState(null); 
       const [editHistoryForm, setEditHistoryForm] = useState({ reason: '', amount: 0, date: '' });
 
       const [deleteTarget, setDeleteTarget] = useState(null); 
 
-      // --- Firebase Auth ---
       useEffect(() => {
         const initAuth = async () => {
           try {
-            // 已切換為您的專屬 Firebase，這裡直接使用匿名登入
             await signInAnonymously(auth);
           } catch (err) {
             console.error("Auth Init Error:", err);
-            // 若未開啟匿名登入，顯示提醒
             if (err.code === 'auth/operation-not-allowed') {
                console.warn("請至 Firebase 控制台的 Authentication 開啟「匿名 (Anonymous)」登入！");
             }
@@ -355,7 +356,6 @@
         return () => unsub();
       }, []);
 
-      // --- Firebase Data Sync ---
       useEffect(() => {
         if (!user) return;
         
@@ -363,7 +363,7 @@
           const loadedClasses = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           loadedClasses.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
           setClassesData(loadedClasses);
-          if (!selectedClassId && loadedClasses.length > 0) {
+          if (!selectedClassId && loadedClasses.length > 0 && viewMode === 'class_dashboard') {
             setSelectedClassId(loadedClasses[0].id);
           }
         }, (err) => console.error(err));
@@ -371,7 +371,6 @@
         const unsubStudents = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'students')), (snapshot) => {
           const loadedStudents = snapshot.docs.map(d => ({ 
             id: d.id, 
-            order: d.data().order || 0, // 加入 order 欄位
             ...d.data() 
           }));
           setStudentsData(loadedStudents);
@@ -393,15 +392,13 @@
         }, (err) => console.error(err));
 
         return () => { unsubClasses(); unsubStudents(); unsubCategories(); unsubRewards(); };
-      }, [user, selectedClassId]);
+      }, [user, selectedClassId, viewMode]);
 
-      // --- 業務邏輯安全過濾 (防呆陣列) ---
       const safeClasses = (classesData || []).filter(c => c && c.id);
       const safeStudents = (studentsData || []).filter(s => s && s.id);
       const safeCategories = (categoriesData || []).filter(c => c && c.id);
       const safeRewards = (rewardsData || []).filter(r => r && r.id);
 
-      // 商店商品處理
       const enhancedRewards = safeRewards.map(r => {
         const cat = safeCategories.find(c => c.id === r.categoryId);
         return { ...r, categoryName: cat ? cat.name : null };
@@ -417,44 +414,40 @@
         ? enhancedRewards 
         : enhancedRewards.filter(r => r.categoryId === selectedCategoryId);
 
-      // 學生名單處理 (搜尋與排序)
       const currentClass = safeClasses.find(c => c.id === selectedClassId);
-      const classStudents = safeStudents.filter(s => s.classId === selectedClassId);
+      
+      // 取得屬於目前班級的學生 (相容舊版結構與新版結構)
+      const classStudents = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
       const selectedStudent = safeStudents.find(s => s.id === selectedStudentId);
 
       let filteredStudents = classStudents;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         filteredStudents = classStudents.filter(s => {
-          // 強制轉為字串並比對，確保無論是座號還是姓名都能精準搜尋到
+          const seatNum = getStudentSeat(s, selectedClassId);
           const matchName = String(s.name || '').toLowerCase().includes(q);
-          const matchSeat = String(s.seatNumber || '').toLowerCase().includes(q);
+          const matchSeat = String(seatNum || '').toLowerCase().includes(q);
           return matchName || matchSeat;
         });
       }
       
-      // 排序：自訂排序(order)優先 -> 座號 -> 姓名
       filteredStudents.sort((a, b) => {
-        // 1. 先比較自訂排序 order
-        const orderA = a.order || 0;
-        const orderB = b.order || 0;
+        const orderA = getStudentOrder(a, selectedClassId);
+        const orderB = getStudentOrder(b, selectedClassId);
         if (orderA !== orderB) return orderA - orderB;
 
-        // 2. 若 order 相同，再比較座號
-        const numA = parseInt(a.seatNumber, 10);
-        const numB = parseInt(b.seatNumber, 10);
-        const validA = !isNaN(numA);
-        const validB = !isNaN(numB);
+        const seatA = parseInt(getStudentSeat(a, selectedClassId), 10);
+        const seatB = parseInt(getStudentSeat(b, selectedClassId), 10);
+        const validA = !isNaN(seatA);
+        const validB = !isNaN(seatB);
 
-        if (validA && validB) return numA - numB;
+        if (validA && validB) return seatA - seatB;
         if (validA) return -1;
         if (validB) return 1;
         
-        // 3. 最後依名稱排序
         return (a.name || '').localeCompare(b.name || '');
       });
 
-      // 切換視圖
       const handleSwitchClass = (classId) => {
         setSelectedClassId(classId);
         setViewMode('class_dashboard');
@@ -464,7 +457,7 @@
         setActionTab('earn');
         setCustomReason('');
         setCustomPoints('');
-        setSearchQuery(''); // 清空搜尋
+        setSearchQuery(''); 
         if (window.innerWidth < 768) setIsSidebarOpen(false);
       };
 
@@ -476,25 +469,32 @@
         if (window.innerWidth < 768) setIsSidebarOpen(false);
       };
 
-      const handleSelectStudentDetail = (studentId) => {
+      const handleGoToStudentManagement = () => {
+        setViewMode('student_management');
+        setSelectedStudentId('');
+        setMultiSelectedIds([]);
+        setSearchQuery('');
+        if (window.innerWidth < 768) setIsSidebarOpen(false);
+      };
+
+      const handleSelectStudentDetail = (studentId, fromMode = 'class_dashboard') => {
+        setPreviousViewMode(fromMode);
         setSelectedStudentId(studentId);
         setViewMode('student_detail');
       };
 
       const handleBackToClass = () => {
-        setViewMode('class_dashboard');
+        setViewMode(previousViewMode);
         setSelectedStudentId('');
       };
 
-      // CSV 匯出
       const exportToCSV = () => {
         if (!classStudents || classStudents.length === 0) return;
         const headers = ["班級", "座號", "姓名", "目前餘額", "最後更新日期", "最後摘要"];
         
-        // 匯出時也依照座號排序
         const sortedForExport = [...classStudents].sort((a, b) => {
-          const numA = parseInt(a.seatNumber, 10);
-          const numB = parseInt(b.seatNumber, 10);
+          const numA = parseInt(getStudentSeat(a, selectedClassId), 10);
+          const numB = parseInt(getStudentSeat(b, selectedClassId), 10);
           if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
           if (!isNaN(numA)) return -1;
           if (!isNaN(numB)) return 1;
@@ -506,7 +506,7 @@
           const lastRecord = safeHistory.length > 0 ? safeHistory[0] : {};
           return [
             currentClass?.name || '-',
-            student.seatNumber || '',
+            getStudentSeat(student, selectedClassId),
             student.name || '未命名',
             student.balance || 0,
             lastRecord.date || '-',
@@ -529,7 +529,6 @@
          setTimeout(() => setToast(null), 3000);
       };
 
-      // --- 加扣分核心 (樂觀無延遲) ---
       const applyPoints = (baseAmount, reason) => {
         if (!user) return;
 
@@ -615,7 +614,6 @@
         setCustomReason('');
       };
 
-      // --- 商店群組管理 (樂觀無延遲) ---
       const handleAddCategory = () => {
         if (!newCategoryName.trim() || !user) return;
         const newId = `cat${Date.now()}`;
@@ -659,7 +657,6 @@
         setDeleteTarget({ type: 'category', id: category.id, name: category.name });
       };
 
-      // --- 商店獎品管理 (樂觀無延遲) ---
       const handleOpenAddReward = () => {
         setNewRewardName('');
         setNewRewardCost('');
@@ -747,27 +744,46 @@
         batch.commit().catch(err => console.error(err));
       };
 
-      // --- 刪除邏輯 (樂觀無延遲) ---
       const confirmDelete = () => {
-        if (!deleteTarget) return; // 放寬檢查，不再強制要求 deleteTarget.id 必須存在
+        if (!deleteTarget) return; 
         const batch = writeBatch(db);
 
-        const { type, id, studentId, transactionId, historyIndex, amount } = deleteTarget;
+        const { type, id, studentId, historyIndex, amount, classId } = deleteTarget;
 
         setDeleteTarget(null);
 
-        if (type === 'student') {
+        if (type === 'student_from_class') {
+           const student = safeStudents.find(s => s.id === id);
+           if (student) {
+             const newClassInfo = { ...(student.classInfo || {}) };
+             delete newClassInfo[classId];
+             
+             const updateData = { classInfo: newClassInfo };
+             if (student.classId === classId) updateData.classId = null;
+             
+             batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', id), updateData);
+             setMultiSelectedIds(prev => prev.filter(pid => pid !== id));
+             showToast("已從班級移除", "success");
+           }
+        } else if (type === 'student_global') {
            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'students', id));
            setMultiSelectedIds(prev => prev.filter(pid => pid !== id));
+           showToast("已永久刪除學生", "success");
         } else if (type === 'reward') {
            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'rewards', id));
         } else if (type === 'class') {
            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'classes', id));
            if (selectedClassId === id) setSelectedClassId('');
            
-           const studentsToDelete = safeStudents.filter(s => s.classId === id);
-           studentsToDelete.forEach(s => {
-              if (s.id) batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'students', s.id));
+           const studentsInClass = safeStudents.filter(s => isStudentInClass(s, id));
+           studentsInClass.forEach(s => {
+              if (s.id) {
+                 const newClassInfo = { ...(s.classInfo || {}) };
+                 delete newClassInfo[id];
+                 const updateData = { classInfo: newClassInfo };
+                 if (s.classId === id) updateData.classId = null;
+                 batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', s.id), updateData);
+              }
            });
 
         } else if (type === 'category') {
@@ -782,7 +798,6 @@
         } else if (type === 'history') {
            const student = safeStudents.find(s => s.id === studentId);
            if (student) {
-              // 精準透過陣列索引 index 移除項目，確保 100% 成功刪除
               const newHistory = (student.history || []).filter((h, index) => index !== historyIndex);
               const newBalance = (student.balance || 0) - Number(amount || 0); 
               batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', studentId), {
@@ -795,25 +810,40 @@
         batch.commit().catch(err => console.error("Delete Error", err));
       };
 
-      // --- 班級與學生管理 (樂觀無延遲) ---
-      
-      // 單一新增學生
+      const handleCreateGlobalStudent = () => {
+         if (!globalStudentName.trim() || !user) return;
+         const newId = `s${Date.now()}`;
+         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', newId), {
+             id: newId, 
+             name: globalStudentName.trim(), 
+             balance: 0, 
+             classInfo: {}, 
+             history: [{ id: Date.now(), date: new Date().toLocaleDateString(), reason: '開戶', amount: 0 }]
+         }).then(() => {
+             setGlobalStudentName('');
+             setIsAddGlobalStudentOpen(false);
+             showToast("已建立學生", "success");
+         }).catch(err => console.error(err));
+      };
+
       const handleAddStudent = () => {
         if (!newStudentName.trim() || !user || !selectedClassId) return;
         const newId = `s${Date.now()}`;
         
-        // 找出目前班級學生的最大 order
-        const classStudentsForOrder = safeStudents.filter(s => s.classId === selectedClassId);
-        const maxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, s.order || 0), 0);
+        const classStudentsForOrder = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
+        const maxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, getStudentOrder(s, selectedClassId)), 0);
 
         const studentData = {
           id: newId,
-          classId: selectedClassId,
           name: newStudentName.trim(),
-          seatNumber: newStudentSeat.trim(),
           balance: 0,
-          order: maxOrder + 1, // 賦予新的 order
-          history: [{ id: Date.now(), date: new Date().toLocaleDateString(), reason: '開戶', amount: 0 }]
+          history: [{ id: Date.now(), date: new Date().toLocaleDateString(), reason: '開戶', amount: 0 }],
+          classInfo: {
+             [selectedClassId]: {
+                seatNumber: newStudentSeat.trim(),
+                order: maxOrder + 1
+             }
+          }
         };
 
         setNewStudentName('');
@@ -824,7 +854,25 @@
           .catch(err => console.error(err));
       };
 
-      // 批次匯入學生
+      const addExistingStudentToClass = (student) => {
+        if (!student || !selectedClassId) return;
+        const classStudentsForOrder = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
+        const currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, getStudentOrder(s, selectedClassId)), 0);
+        
+        const newClassInfo = { ...(student.classInfo || {}) };
+        if (student.classId && student.classId !== selectedClassId && !newClassInfo[student.classId]) {
+            newClassInfo[student.classId] = { seatNumber: student.seatNumber || '', order: student.order || 0 };
+        }
+        newClassInfo[selectedClassId] = { seatNumber: '', order: currentMaxOrder + 1 };
+        
+        const updateData = { classInfo: newClassInfo };
+        if (student.classId === selectedClassId) updateData.classId = null;
+
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', student.id), updateData)
+            .then(() => showToast(`已將 ${student.name} 加入班級`, "success"))
+            .catch(err => console.error(err));
+      };
+
       const handleBatchImport = () => {
         if (!batchInput.trim() || !user || !selectedClassId) return;
         
@@ -832,12 +880,10 @@
         const batch = writeBatch(db);
         let count = 0;
 
-        // 找出目前班級學生的最大 order
-        const classStudentsForOrder = safeStudents.filter(s => s.classId === selectedClassId);
-        let currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, s.order || 0), 0);
+        const classStudentsForOrder = safeStudents.filter(s => isStudentInClass(s, selectedClassId));
+        let currentMaxOrder = classStudentsForOrder.reduce((max, s) => Math.max(max, getStudentOrder(s, selectedClassId)), 0);
 
         lines.forEach(line => {
-          // 支援格式：「1 王小明」、「02, 李四」、「張三」
           const match = line.trim().match(/^(\d+)[\s.、,-]*(.+)$/);
           let seatNumber = '';
           let name = line.trim();
@@ -853,12 +899,15 @@
             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'students', newId);
             batch.set(ref, {
               id: newId,
-              classId: selectedClassId,
-              seatNumber: seatNumber,
               name: name,
               balance: 0,
-              order: currentMaxOrder, // 依序賦予 order
-              history: [{ id: Date.now() + count, date: new Date().toLocaleDateString(), reason: '批次建立', amount: 0 }]
+              history: [{ id: Date.now() + count, date: new Date().toLocaleDateString(), reason: '批次建立', amount: 0 }],
+              classInfo: {
+                 [selectedClassId]: {
+                    seatNumber: seatNumber,
+                    order: currentMaxOrder
+                 }
+              }
             });
           }
         });
@@ -965,7 +1014,7 @@
         if (!student) return;
         setDeleteTarget({ 
           type: 'history', 
-          id: record.id || `hist-${index}`, // 確保有 id 避免防呆機制阻擋
+          id: record.id || `hist-${index}`, 
           name: `交易紀錄: ${record.reason || '無事由'} ($${record.amount || 0})`, 
           studentId: student.id, 
           transactionId: record.id,
@@ -978,36 +1027,58 @@
         if (!renameTarget || !(renameTarget.newName || '').trim()) return;
         const targetId = renameTarget.id;
         const newName = renameTarget.newName.trim();
-        const newSeat = (renameTarget.newSeatNumber || '').trim();
         const type = renameTarget.type;
         
-        setRenameTarget(null);
+        if (type === 'student_from_class') {
+           const newSeat = (renameTarget.newSeatNumber || '').trim();
+           const student = safeStudents.find(s => s.id === targetId);
+           if (!student) return;
 
-        if (type === 'student') {
+           const newClassInfo = { ...(student.classInfo || {}) };
+           if (student.classId && !newClassInfo[student.classId]) {
+               newClassInfo[student.classId] = { seatNumber: student.seatNumber || '', order: student.order || 0 };
+           }
+           
+           newClassInfo[renameTarget.classId] = {
+               ...newClassInfo[renameTarget.classId],
+               seatNumber: newSeat,
+               order: getStudentOrder(student, renameTarget.classId)
+           };
+
            updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetId), {
              name: newName,
-             seatNumber: newSeat
-           }).catch(err => console.error(err));
-        } 
+             classInfo: newClassInfo
+           }).then(() => setRenameTarget(null)).catch(err => console.error(err));
+        } else if (type === 'student_global') {
+           updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetId), {
+             name: newName
+           }).then(() => setRenameTarget(null)).catch(err => console.error(err));
+        }
       };
 
-      const openRenameStudent = (e, student) => {
+      const openRenameStudent = (e, student, isGlobal = false) => {
         e.stopPropagation();
         if(!student) return;
         setRenameTarget({ 
-          type: 'student', 
+          type: isGlobal ? 'student_global' : 'student_from_class', 
           id: student.id, 
           name: student.name, 
           newName: student.name || '',
-          seatNumber: student.seatNumber || '',
-          newSeatNumber: student.seatNumber || ''
+          seatNumber: isGlobal ? '' : getStudentSeat(student, selectedClassId),
+          newSeatNumber: isGlobal ? '' : getStudentSeat(student, selectedClassId),
+          classId: selectedClassId
         });
       };
 
       const requestDeleteStudent = (e, student) => {
         e.stopPropagation();
         if(!student) return;
-        setDeleteTarget({ type: 'student', id: student.id, name: student.name });
+        setDeleteTarget({ type: 'student_from_class', id: student.id, name: student.name, classId: selectedClassId });
+      };
+
+      const requestDeleteGlobalStudent = (student) => {
+        if(!student) return;
+        setDeleteTarget({ type: 'student_global', id: student.id, name: student.name });
       };
 
       const toggleStudentSelection = (studentId) => {
@@ -1023,11 +1094,9 @@
         }
       };
 
-      // 學生拖曳排序 (上下移動)
       const moveStudent = (student, direction) => {
         if (!student) return;
         
-        // 只在當前篩選與排序後的列表中尋找相鄰的學生
         const currentIndex = filteredStudents.findIndex(s => s.id === student.id);
         const newIndex = currentIndex + direction;
 
@@ -1036,10 +1105,30 @@
         const targetStudent = filteredStudents[newIndex];
         if (!targetStudent) return;
         
+        const studentOrder = getStudentOrder(student, selectedClassId);
+        const targetOrder = getStudentOrder(targetStudent, selectedClassId);
+
         const batch = writeBatch(db);
-        // 交換 order
-        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', student.id), { order: targetStudent.order ?? newIndex });
-        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetStudent.id), { order: student.order ?? currentIndex });
+        
+        const updateStudentOrderObj = (s, cId, newOrder) => {
+            const currentInfo = s.classInfo || {};
+            const legacySeat = s.classId === cId ? s.seatNumber : '';
+            return {
+                ...currentInfo,
+                [cId]: {
+                    ...currentInfo[cId],
+                    seatNumber: currentInfo[cId]?.seatNumber ?? legacySeat,
+                    order: newOrder
+                }
+            };
+        };
+
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', student.id), { 
+            classInfo: updateStudentOrderObj(student, selectedClassId, targetOrder) 
+        });
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'students', targetStudent.id), { 
+            classInfo: updateStudentOrderObj(targetStudent, selectedClassId, studentOrder) 
+        });
         
         batch.commit().catch(err => console.error("Move Student Error:", err));
       };
@@ -1057,7 +1146,7 @@
       return (
         <div className="flex h-screen bg-amber-50 font-sans text-gray-800 overflow-hidden">
           
-          {/* 行動版遮罩 (修正為完整閉合標籤避免編譯器誤判) */}
+          {/* 行動版遮罩 */}
           {isSidebarOpen && (
             <div 
               className="fixed inset-0 bg-black/20 z-20 md:hidden transition-opacity"
@@ -1067,7 +1156,7 @@
 
           {/* 左側選單 */}
           <aside className={`
-            fixed md:relative z-30 w-64 h-full bg-white border-r border-amber-200 flex flex-col shadow-lg transition-transform duration-300
+            fixed md:relative z-30 w-64 h-full bg-white border-r border-amber-200 flex flex-col shadow-lg transition-transform duration-300 shrink-0
             ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           `}>
             <div className="p-4 bg-amber-400 text-white flex items-center justify-between shadow-md">
@@ -1081,7 +1170,6 @@
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {/* 商店按鈕 */}
               <div className="mb-4">
                 <div className="text-xs font-bold text-gray-400 px-3 py-2 uppercase tracking-wider">功能頁面</div>
                 <button
@@ -1095,6 +1183,19 @@
                   <div className="flex items-center">
                     <ShoppingBag size={18} className="mr-2 opacity-70" />
                     鼓勵商店
+                  </div>
+                </button>
+                <button
+                  onClick={handleGoToStudentManagement}
+                  className={`w-full p-3 mt-1 rounded-lg flex items-center justify-between transition-all ${
+                    viewMode === 'student_management'
+                      ? 'bg-blue-100 text-blue-900 font-bold border-l-4 border-blue-500' 
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <Users size={18} className="mr-2 opacity-70" />
+                    學生總表
                   </div>
                 </button>
               </div>
@@ -1116,7 +1217,7 @@
                   key={cls.id}
                   onClick={() => handleSwitchClass(cls.id)}
                   className={`w-full p-3 rounded-lg flex items-center justify-between transition-all ${
-                    selectedClassId === cls.id && viewMode !== 'store_management'
+                    selectedClassId === cls.id && (viewMode === 'class_dashboard' || viewMode === 'student_detail')
                       ? 'bg-amber-100 text-amber-900 font-bold border-l-4 border-amber-500' 
                       : 'text-gray-600 hover:bg-gray-50'
                   }`}
@@ -1166,11 +1267,92 @@
                 <MoreVertical size={24} className="rotate-90" />
               </button>
               <span className="font-bold text-lg text-gray-700 truncate">
-                {viewMode === 'store_management' ? '鼓勵商店' : (currentClass?.name || '請選擇班級')}
+                {viewMode === 'store_management' ? '鼓勵商店' : 
+                 viewMode === 'student_management' ? '學生總表' : 
+                 (currentClass?.name || '請選擇班級')}
               </span>
             </div>
 
-            {viewMode === 'store_management' ? (
+            {viewMode === 'student_management' ? (
+              // =======================
+              // 學生總表管理頁面
+              // =======================
+              <div className="flex-1 overflow-y-auto bg-blue-50 p-4 md:p-6">
+                <div className="max-w-5xl mx-auto">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-blue-900 flex items-center">
+                        <Users className="mr-2 shrink-0" /> 學生總表
+                      </h2>
+                      <p className="text-blue-600 text-sm mt-1">管理所有學生資料，同一學生可加入多個班級且點數互通</p>
+                    </div>
+                    <div className="flex gap-2">
+                       <button 
+                        onClick={() => setIsAddGlobalStudentOpen(true)}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-md hover:bg-blue-700 transition-colors flex items-center text-sm font-bold whitespace-nowrap"
+                       >
+                         <Plus size={18} className="mr-2 shrink-0" /> 建立新學生
+                       </button>
+                    </div>
+                  </div>
+                  
+                  {isAddGlobalStudentOpen && (
+                     <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-blue-200 animate-fadeIn">
+                       <h3 className="font-bold text-gray-700 mb-3">新增學生至總表</h3>
+                       <div className="flex gap-2">
+                          <input 
+                            autoFocus
+                            className="flex-1 p-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                            placeholder="學生姓名"
+                            value={globalStudentName}
+                            onChange={e => setGlobalStudentName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleCreateGlobalStudent()}
+                          />
+                          <button onClick={handleCreateGlobalStudent} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold">儲存</button>
+                          <button onClick={() => setIsAddGlobalStudentOpen(false)} className="bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm font-bold">取消</button>
+                       </div>
+                     </div>
+                  )}
+
+                  <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+                     {/* Table header (hidden on mobile) */}
+                     <div className="hidden md:grid grid-cols-12 gap-4 p-4 bg-blue-50 border-b font-bold text-gray-600 text-sm">
+                        <div className="col-span-3">姓名</div>
+                        <div className="col-span-3">總點數</div>
+                        <div className="col-span-4">所屬班級</div>
+                        <div className="col-span-2 text-right">操作</div>
+                     </div>
+                     <div className="divide-y divide-gray-100">
+                        {safeStudents.length === 0 && <div className="p-8 text-center text-gray-400">目前總表中沒有學生</div>}
+                        {safeStudents.map(student => (
+                           <div key={student.id} className="flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 md:items-center hover:bg-blue-50/50 transition-colors">
+                              <div className="md:col-span-3 font-bold text-gray-800 text-lg md:text-base flex justify-between items-center">
+                                  {student.name}
+                                  <div className="md:hidden font-mono font-bold text-green-600">${student.balance || 0}</div>
+                              </div>
+                              <div className="hidden md:block md:col-span-3 font-mono font-bold text-green-600">${student.balance || 0}</div>
+                              <div className="md:col-span-4 flex flex-wrap gap-1">
+                                 {safeClasses.filter(c => isStudentInClass(student, c.id)).map(c => (
+                                    <span key={c.id} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded border">
+                                       {c.name}
+                                    </span>
+                                 ))}
+                                 {safeClasses.filter(c => isStudentInClass(student, c.id)).length === 0 && (
+                                    <span className="text-[10px] text-gray-400 italic">未加入任何班級</span>
+                                 )}
+                              </div>
+                              <div className="md:col-span-2 flex justify-end gap-3 md:gap-2 mt-2 md:mt-0 border-t md:border-t-0 pt-3 md:pt-0">
+                                 <button onClick={() => handleSelectStudentDetail(student.id, 'student_management')} className="text-gray-500 hover:text-amber-600 flex items-center text-sm font-bold bg-amber-50 px-2 py-1 rounded"><ExternalLink size={14} className="mr-1"/>詳情</button>
+                                 <button onClick={(e) => openRenameStudent(e, student, true)} className="text-gray-500 hover:text-blue-500 p-1"><Edit2 size={16}/></button>
+                                 <button onClick={() => requestDeleteGlobalStudent(student)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+                  </div>
+                </div>
+              </div>
+            ) : viewMode === 'store_management' ? (
               // =======================
               // 商店管理頁面
               // =======================
@@ -1212,7 +1394,6 @@
                           onChange={e => setNewRewardName(e.target.value)}
                         />
                         
-                        {/* 分類選擇 */}
                         <div className="w-full md:w-40 relative">
                            <select 
                              className="w-full p-2 border rounded-lg text-sm bg-white cursor-pointer outline-none focus:border-purple-400"
@@ -1361,11 +1542,11 @@
                   )}
                 </div>
               </div>
-            ) : !selectedClassId ? (
+            ) : !selectedClassId && viewMode !== 'student_detail' ? (
               <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
                 <School size={64} className="mb-4 text-amber-200" />
                 <h2 className="text-xl font-bold text-gray-600">歡迎使用鼓勵存摺</h2>
-                <p className="mt-2">請從左側選擇班級開始。</p>
+                <p className="mt-2">請從左側選擇班級或功能頁面開始。</p>
               </div>
             ) : (
               // =======================
@@ -1389,7 +1570,7 @@
                         <div className="overflow-hidden">
                            {viewMode === 'student_detail' ? (
                               <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-baseline truncate">
-                                {selectedStudent?.seatNumber && <span className="text-sm text-gray-400 mr-1.5 font-mono">{selectedStudent.seatNumber}</span>}
+                                {selectedClassId && getStudentSeat(selectedStudent, selectedClassId) && <span className="text-sm text-gray-400 mr-1.5 font-mono">{getStudentSeat(selectedStudent, selectedClassId)}</span>}
                                 <span className="truncate">{selectedStudent?.name || '未命名'}</span>
                                 <span className="ml-2 text-sm font-normal text-gray-500 shrink-0">的存摺</span>
                               </h2>
@@ -1719,6 +1900,7 @@
                           const isSelected = multiSelectedIds.includes(student.id);
                           const isFirst = index === 0;
                           const isLast = index === filteredStudents.length - 1;
+                          const currentSeat = getStudentSeat(student, selectedClassId);
 
                           return (
                             <div 
@@ -1732,10 +1914,9 @@
                                 }
                               `}
                             >
-                              {/* 座號顯示 */}
-                              {student.seatNumber && (
+                              {currentSeat && (
                                 <div className="absolute top-0 left-0 bg-gray-200 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-br-lg z-10">
-                                  {student.seatNumber}
+                                  {currentSeat}
                                 </div>
                               )}
 
@@ -1745,7 +1926,6 @@
                                 </div>
                               )}
 
-                              {/* 排序按鈕 (只有在沒選取且不是行動版才顯示，避免誤觸) */}
                               {!isSelected && (
                                 <div className="absolute top-1 right-1 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                    <button 
@@ -1808,6 +1988,7 @@
                       {/* 單一新增學生卡片 */}
                       {isAddStudentOpen && !searchQuery ? (
                         <div className="bg-white rounded-xl shadow-sm border-2 border-dashed border-amber-300 p-3 md:p-4 flex flex-col justify-center gap-2 overflow-hidden">
+                          <div className="text-xs text-amber-700 font-bold border-b border-amber-100 pb-1 mb-1">建立新學生</div>
                           <div className="flex gap-2 w-full">
                             <input className="w-1/3 min-w-0 p-2 border rounded-lg text-center text-sm outline-none focus:border-amber-400" placeholder="座號" value={newStudentSeat} onChange={e => setNewStudentSeat(e.target.value)} />
                             <input autoFocus className="flex-1 min-w-0 p-2 border rounded-lg text-center font-bold outline-none focus:border-amber-400" placeholder="姓名" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddStudent()} />
@@ -1815,6 +1996,11 @@
                           <div className="flex gap-2 mt-1 w-full">
                             <button onClick={handleAddStudent} className="flex-1 min-w-0 bg-amber-500 text-white py-1.5 rounded-lg text-sm font-bold">新增</button>
                             <button onClick={() => setIsAddStudentOpen(false)} className="flex-1 min-w-0 bg-gray-200 text-gray-600 py-1.5 rounded-lg text-sm font-bold">取消</button>
+                          </div>
+                          <div className="mt-1 pt-2 border-t border-dashed border-amber-200 text-center">
+                             <button onClick={() => { setIsAddStudentOpen(false); setIsSelectExistingOpen(true); }} className="text-xs md:text-sm text-blue-600 hover:text-blue-800 font-bold flex items-center justify-center w-full bg-blue-50 hover:bg-blue-100 py-1.5 md:py-2 rounded-lg transition-colors">
+                                <Users size={14} className="mr-1"/> 從總表選取既有學生
+                             </button>
                           </div>
                         </div>
                       ) : currentClass && !searchQuery ? (
@@ -1829,6 +2015,52 @@
               </>
             )}
           </main>
+
+          {/* Modal: 從總表加入既有學生 */}
+          {isSelectExistingOpen && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
+               <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg animate-fadeIn flex flex-col max-h-[90vh]">
+                 <div className="flex items-center justify-between mb-4 border-b pb-3 shrink-0">
+                   <h3 className="text-xl font-bold text-gray-800 flex items-center"><UserPlus size={20} className="mr-2 text-blue-600"/> 從總表加入學生</h3>
+                   <button onClick={() => setIsSelectExistingOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                 </div>
+                 
+                 <div className="mb-3 shrink-0">
+                   <div className="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:border-blue-400">
+                     <Search size={16} className="text-gray-400 mr-2" />
+                     <input 
+                       className="w-full bg-transparent text-sm outline-none"
+                       placeholder="搜尋學生姓名..."
+                       value={existingSearch}
+                       onChange={e => setExistingSearch(e.target.value)}
+                     />
+                   </div>
+                 </div>
+
+                 <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                   {(() => {
+                      const available = safeStudents.filter(s => !isStudentInClass(s, selectedClassId) && (s.name || '').includes(existingSearch));
+                      if (available.length === 0) return <div className="text-center py-8 text-gray-400 text-sm">沒有符合的學生可供加入</div>;
+                      
+                      return available.map(s => (
+                         <div key={s.id} className="flex justify-between items-center p-3 border rounded-lg hover:border-blue-300 bg-white shadow-sm">
+                            <div>
+                               <div className="font-bold text-gray-700">{s.name}</div>
+                               <div className="text-[10px] text-gray-400 mt-1">
+                                  目前點數: <span className="font-mono text-green-500 font-bold">${s.balance || 0}</span>
+                               </div>
+                            </div>
+                            <button 
+                               onClick={() => addExistingStudentToClass(s)}
+                               className="bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-600 hover:text-white px-4 py-1.5 rounded-lg font-bold text-sm transition-colors flex items-center"
+                            ><Plus size={14} className="mr-1"/> 加入</button>
+                         </div>
+                      ));
+                   })()}
+                 </div>
+               </div>
+            </div>
+          )}
 
           {/* Modal: 批次匯入學生 */}
           {isBatchImportOpen && (
@@ -1928,7 +2160,11 @@
                    ) : deleteTarget.type === 'category' ? (
                        <span className="text-xs text-orange-500 mt-2 block font-bold">群組刪除後，該群組內的商品將變為「無群組」，但不會被刪除。</span>
                    ) : deleteTarget.type === 'class' ? (
-                       <span className="text-xs text-red-500 mt-2 block font-bold">警告：這會同時刪除該班級下所有的學生及明細紀錄！</span>
+                       <span className="text-xs text-red-500 mt-2 block font-bold">警告：班級刪除後，學生將被移出該班級，但總表點數不受影響。</span>
+                   ) : deleteTarget.type === 'student_from_class' ? (
+                       <span className="text-xs text-orange-500 mt-2 block font-bold">這僅會將學生從此班級移除。總表的點數與明細紀錄「不會」被刪除。</span>
+                   ) : deleteTarget.type === 'student_global' ? (
+                       <span className="text-xs text-red-500 mt-2 block font-bold">警告：此操作將「永久刪除」該學生，包含所有班級中的紀錄與點數，且無法復原！</span>
                    ) : (
                        <span className="text-xs text-red-400 mt-2 block">此動作無法復原，所有相關紀錄將被移除。</span>
                    )}
@@ -1955,19 +2191,23 @@
           {renameTarget && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] backdrop-blur-sm p-4">
                <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fadeIn max-h-[90vh] overflow-y-auto">
-                 <h3 className="text-xl font-bold mb-4 text-gray-800">編輯學生資料</h3>
+                 <h3 className="text-xl font-bold mb-4 text-gray-800">
+                    {renameTarget.type === 'student_global' ? '編輯學生姓名' : '編輯學生資料'}
+                 </h3>
                  <div className="space-y-3 mb-6">
+                   {renameTarget.type === 'student_from_class' && (
+                     <div>
+                       <label className="text-xs font-bold text-gray-500 uppercase block mb-1">本班專屬座號</label>
+                       <input 
+                         className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
+                         value={renameTarget.newSeatNumber || ''}
+                         onChange={(e) => setRenameTarget({...renameTarget, newSeatNumber: e.target.value})}
+                         placeholder="選填"
+                       />
+                     </div>
+                   )}
                    <div>
-                     <label className="text-xs font-bold text-gray-500 uppercase block mb-1">座號</label>
-                     <input 
-                       className="w-full p-2 border rounded-lg outline-none focus:border-blue-400"
-                       value={renameTarget.newSeatNumber || ''}
-                       onChange={(e) => setRenameTarget({...renameTarget, newSeatNumber: e.target.value})}
-                       placeholder="選填"
-                     />
-                   </div>
-                   <div>
-                     <label className="text-xs font-bold text-gray-500 uppercase block mb-1">姓名</label>
+                     <label className="text-xs font-bold text-gray-500 uppercase block mb-1">全域姓名</label>
                      <input 
                        autoFocus
                        className="w-full p-2 border rounded-lg outline-none focus:border-blue-400 font-bold"
