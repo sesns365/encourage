@@ -69,29 +69,22 @@
       
       const { Users, UserPlus, BookOpen, Clock, Briefcase, FileText, Smile, Star, Coins, School, Database, ArrowLeft, Trash2, MoreVertical, LayoutGrid, Download, MinusCircle, PlusCircle, CheckCircle2, ExternalLink, Gift, ShoppingBag, Plus, Send, AlertTriangle, X, Settings, Edit2, ChevronUp, ChevronDown, PenLine, Tags, Filter, ChevronLeft, ChevronRight, FolderEdit, Search, ListPlus, Store } = LucideIcons;
       // 引入 Firebase SDK
-
-      // --- Firebase 初始化（請改成自己的專案設定） ---
-      // 1. 到 Firebase 主控台建立專案與 Web App。
-      // 2. 將自己的 firebaseConfig 貼到下方。
-      // 3. 啟用 Authentication 的「匿名」登入，以及 Firestore Database。
-      // 4. 若要使用不同的資料路徑，可一併修改 FIREBASE_APP_ID。
-      const firebaseConfig = {
-          apiKey: "請填入自己的 apiKey",
-          authDomain: "請填入自己的 authDomain",
-          projectId: "請填入自己的 projectId",
-          storageBucket: "請填入自己的 storageBucket",
-          messagingSenderId: "請填入自己的 messagingSenderId",
-          appId: "請填入自己的 appId"
+      
+      
+      
+      // --- Firebase 初始化 ---
+      const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+          apiKey: "AIzaSyBXo1w7t0m628itmIc80yxbdWCXeQFSqzw",
+          authDomain: "encourage-aac2a.firebaseapp.com",
+          projectId: "encourage-aac2a",
+          storageBucket: "encourage-aac2a.firebasestorage.app",
+          messagingSenderId: "199149170670",
+          appId: "1:199149170670:web:4819074ddd69597641a8ff"
       };
-      const FIREBASE_APP_ID = '請填入自己的資料路徑名稱';
-      const firebaseConfigIsReady = Object.values(firebaseConfig).every(value => value && !String(value).includes('請填入')) && !FIREBASE_APP_ID.includes('請填入');
-      if (!firebaseConfigIsReady) {
-          throw new Error('請先開啟 index_firebase_template.html，將自己的 Firebase 設定填入程式碼上方的 firebaseConfig 與 FIREBASE_APP_ID。');
-      }
       const app = initializeApp(firebaseConfig);
       const auth = getAuth(app);
       const db = getFirestore(app);
-      const appId = FIREBASE_APP_ID;
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'encourage-aac2a';
       // --- 輔助函式：判斷學生是否在班級內及獲取專屬座號 ---
       const isStudentInClass = (s, cId) => s.classId === cId || (s.classInfo && s.classInfo[cId] !== undefined);
       const getStudentSeat = (s, cId) => s.classInfo?.[cId]?.seatNumber ?? (s.classId === cId ? s.seatNumber : '');
@@ -209,151 +202,6 @@
               React.createElement("button", { onClick: () => onDeleteRequest(item), className: "p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors", title: "\u522A\u9664" },
                   React.createElement(Trash2, { size: 18 }))));
       };
-      // 學生總表：僅處理畫面篩選、分頁、勾選與 CSV 匯出，不寫入資料庫。
-      function StudentRoster({ students, classes, view, setView, onDetail, onRename, onDelete }) {
-          const h = React.createElement;
-          const patchView = (patch) => setView(previous => ({ ...previous, ...patch }));
-          const activeGroup = view.group.startsWith('class:') && !classes.some(c => `class:${c.id}` === view.group) ? 'all' : view.group;
-          const groupClassId = activeGroup.startsWith('class:') ? activeGroup.slice(6) : null;
-          const memberships = student => classes.filter(c => isStudentInClass(student, c.id));
-          const unassignedCount = students.filter(student => memberships(student).length === 0).length;
-          const queryText = view.query.trim().toLowerCase();
-          const matchingStudents = students.filter(student => {
-              const matchesGroup = activeGroup === 'all' || (activeGroup === 'unassigned'
-                  ? memberships(student).length === 0
-                  : isStudentInClass(student, groupClassId));
-              const seats = [student.seatNumber, ...memberships(student).map(c => getStudentSeat(student, c.id))];
-              const matchesSearch = !queryText || String(student.name || '').toLowerCase().includes(queryText)
-                  || seats.some(seat => String(seat ?? '').toLowerCase().includes(queryText));
-              return matchesGroup && matchesSearch;
-          });
-          const pageCount = Math.max(1, Math.ceil(matchingStudents.length / view.pageSize));
-          const page = Math.min(Math.max(1, view.page), pageCount);
-          const offset = (page - 1) * view.pageSize;
-          const pageStudents = matchingStudents.slice(offset, offset + view.pageSize);
-          const selectedIds = new Set(view.selectedIds);
-          const selectedStudents = students.filter(student => selectedIds.has(student.id));
-          const allPageSelected = pageStudents.length > 0 && pageStudents.every(student => selectedIds.has(student.id));
-          const hiddenSelectedCount = selectedStudents.filter(student => !pageStudents.some(item => item.id === student.id)).length;
-          useEffect(() => {
-              if (activeGroup !== view.group || page !== view.page || selectedStudents.length !== view.selectedIds.length) {
-                  setView(previous => ({
-                      ...previous,
-                      group: activeGroup,
-                      page: activeGroup !== view.group ? 1 : page,
-                      selectedIds: previous.selectedIds.filter(id => students.some(student => student.id === id))
-                  }));
-              }
-          }, [activeGroup, page, selectedStudents.length, view.group, view.page, view.selectedIds.length, students, setView]);
-          const toggleStudent = (id) => setView(previous => ({
-              ...previous,
-              selectedIds: previous.selectedIds.includes(id) ? previous.selectedIds.filter(item => item !== id) : [...previous.selectedIds, id]
-          }));
-          const togglePage = () => setView(previous => {
-              const ids = new Set(previous.selectedIds);
-              const removePage = pageStudents.every(student => ids.has(student.id));
-              pageStudents.forEach(student => removePage ? ids.delete(student.id) : ids.add(student.id));
-              return { ...previous, selectedIds: [...ids] };
-          });
-          const selectMatching = () => setView(previous => ({
-              ...previous,
-              selectedIds: [...new Set([...previous.selectedIds, ...matchingStudents.map(student => student.id)])]
-          }));
-          const exportRoster = (onlySelected) => {
-              const targets = onlySelected ? selectedStudents : students;
-              if (!targets.length) return;
-              // 文字欄防止試算表將姓名或摘要當成公式，數字欄仍保留數值（含負分）。
-              const csvField = value => {
-                  let text = String(value ?? '');
-                  if (typeof value !== 'number' && (/^[\s\uFEFF]*[=+\-@]/.test(text) || /^[\t\r\n]/.test(text))) text = "'" + text;
-                  return `"${text.replace(/"/g, '""')}"`;
-              };
-              const now = new Date();
-              const exportedAt = now.toLocaleString('zh-TW', { hour12: false });
-              const headers = ['座號', '姓名', '目前總點數', '所屬班級', '各班座號', '最後更新日期', '最後摘要', '匯出時間'];
-              const rows = targets.map(student => {
-                  const joinedClasses = memberships(student);
-                  const lastRecord = Array.isArray(student.history) ? (student.history[0] || {}) : {};
-                  const points = Number(student.balance ?? 0);
-                  return [
-                      student.seatNumber ?? '', student.name || '未命名', Number.isFinite(points) ? points : 0,
-                      joinedClasses.map(c => c.name).join('、') || '未加入任何班級',
-                      joinedClasses.map(c => `${c.name}：${getStudentSeat(student, c.id) ?? ''}`).join('、'),
-                      lastRecord.date || '-', lastRecord.reason || '-', exportedAt
-                  ];
-              });
-              const csv = '\uFEFF' + [headers, ...rows].map(row => row.map(csvField).join(',')).join('\r\n');
-              const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-              const link = document.createElement('a');
-              const pad = value => String(value).padStart(2, '0');
-              const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-              link.href = url;
-              link.download = `學生分數現況_${onlySelected ? '勾選學生' : '全部學生'}_${stamp}.csv`;
-              document.body.appendChild(link);
-              link.click();
-              link.remove();
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-          };
-          const buttonClass = 'px-3 py-2 rounded-lg border border-blue-200 bg-white text-blue-700 text-sm font-bold hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed';
-          const pagination = position => h('div', { className: 'flex flex-wrap items-center justify-between gap-3 p-3 bg-white border-t border-blue-100', 'aria-label': `學生總表${position}分頁` },
-              h('span', { className: 'text-sm text-gray-600', 'aria-live': 'polite' }, matchingStudents.length
-                  ? `顯示第 ${offset + 1}–${Math.min(offset + view.pageSize, matchingStudents.length)} 位，共 ${matchingStudents.length} 位`
-                  : '共 0 位學生'),
-              h('div', { className: 'flex flex-wrap items-center gap-2' },
-                  h('button', { type: 'button', className: buttonClass, disabled: page <= 1, onClick: () => patchView({ page: page - 1 }), 'aria-label': `${position}上一頁` }, '上一頁'),
-                  h('select', { 'aria-label': `${position}選擇頁碼`, value: page, className: 'max-w-full border border-blue-200 rounded-lg p-2 text-sm bg-white', onChange: event => patchView({ page: Number(event.target.value) }) },
-                      Array.from({ length: pageCount }, (_, index) => h('option', { key: index + 1, value: index + 1 }, `第 ${index + 1} / ${pageCount} 頁`))),
-                  h('button', { type: 'button', className: buttonClass, disabled: page >= pageCount, onClick: () => patchView({ page: page + 1 }), 'aria-label': `${position}下一頁` }, '下一頁')));
-          return h('div', { className: 'space-y-3', 'data-student-roster': true },
-              h('div', { className: 'bg-white p-4 rounded-xl border border-blue-100 shadow-sm space-y-3' },
-                  h('div', { className: 'flex flex-wrap items-end gap-3' },
-                      h('label', { className: 'flex flex-col gap-1 text-sm font-bold text-gray-600 flex-1 min-w-[160px]' }, '分組顯示（依班級）',
-                          h('select', { value: activeGroup, className: 'w-full min-w-0 p-2 border border-blue-200 rounded-lg bg-white font-normal', onChange: event => patchView({ group: event.target.value, page: 1 }) },
-                              h('option', { value: 'all' }, `全部學生（${students.length}人）`),
-                              h('option', { value: 'unassigned' }, `未分班（${unassignedCount}人）`),
-                              classes.map(c => h('option', { key: c.id, value: `class:${c.id}` }, `${c.name}（${students.filter(student => isStudentInClass(student, c.id)).length}人）`)))),
-                      h('label', { className: 'flex flex-col gap-1 text-sm font-bold text-gray-600 flex-1 min-w-[160px]' }, '搜尋學生',
-                          h('input', { type: 'search', value: view.query, placeholder: '輸入姓名或座號', className: 'w-full min-w-0 p-2 border border-blue-200 rounded-lg font-normal', onChange: event => patchView({ query: event.target.value, page: 1 }) })),
-                      h('label', { className: 'flex flex-col gap-1 text-sm font-bold text-gray-600' }, '每頁人數',
-                          h('select', { value: view.pageSize, className: 'p-2 border border-blue-200 rounded-lg bg-white font-normal', onChange: event => patchView({ pageSize: Number(event.target.value), page: 1 }) },
-                              [10, 20, 50].map(size => h('option', { key: size, value: size }, `${size} 人`))))),
-                  h('div', { className: 'flex flex-wrap gap-2 items-center' },
-                      h('button', { type: 'button', className: buttonClass, disabled: !students.length, onClick: () => exportRoster(false) }, `匯出全部學生分數（${students.length}人）`),
-                      h('button', { type: 'button', className: 'px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed', disabled: !selectedStudents.length, onClick: () => exportRoster(true) }, `匯出勾選學生（${selectedStudents.length}人）`)),
-                  h('p', { className: 'text-xs text-gray-500' }, '下載 CSV，可用 Excel 開啟。「匯出全部」包含所有分組與所有頁面的學生。'),
-                  h('div', { className: 'flex flex-wrap gap-2 items-center border-t border-blue-50 pt-3' },
-                      h('button', { type: 'button', className: buttonClass, disabled: !pageStudents.length, onClick: togglePage }, allPageSelected ? '取消勾選本頁' : '勾選本頁'),
-                      h('button', { type: 'button', className: buttonClass, disabled: !matchingStudents.length, onClick: selectMatching }, `勾選篩選結果（${matchingStudents.length}人）`),
-                      h('button', { type: 'button', className: buttonClass, disabled: !selectedStudents.length, onClick: () => patchView({ selectedIds: [] }) }, '清除全部勾選'),
-                      h('span', { className: 'text-sm text-blue-700', 'aria-live': 'polite' }, `已勾選 ${selectedStudents.length} 人${hiddenSelectedCount ? `（含其他頁面或分組 ${hiddenSelectedCount} 人）` : ''}`))),
-              h('div', { className: 'bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden' },
-                  pagination('上方'),
-                  h('div', { className: 'hidden md:grid grid-cols-12 gap-4 p-4 bg-blue-50 border-y font-bold text-gray-600 text-sm' },
-                      h('div', { className: 'col-span-1' }, '勾選'),
-                      h('div', { className: 'col-span-1' }, '座號'),
-                      h('div', { className: 'col-span-2' }, '姓名'),
-                      h('div', { className: 'col-span-2' }, '總點數'),
-                      h('div', { className: 'col-span-4' }, '所屬班級'),
-                      h('div', { className: 'col-span-2 text-right' }, '操作')),
-                  h('div', { className: 'divide-y divide-gray-100' },
-                      pageStudents.length === 0 && h('div', { className: 'p-8 text-center text-gray-400' }, students.length === 0 ? '目前總表中沒有學生' : '目前分組或搜尋條件沒有符合的學生'),
-                      pageStudents.map(student => h('div', { key: student.id, 'data-roster-student': student.id, className: `grid grid-cols-12 gap-2 md:gap-4 p-4 items-center transition-colors ${selectedIds.has(student.id) ? 'bg-blue-50' : 'hover:bg-blue-50/50'}` },
-                          h('label', { className: 'col-span-1 flex items-center justify-center min-h-[36px] cursor-pointer' },
-                              h('input', { type: 'checkbox', checked: selectedIds.has(student.id), onChange: () => toggleStudent(student.id), 'aria-label': `勾選學生 ${student.name || '未命名'}（座號 ${student.seatNumber ?? '-'}）`, className: 'w-5 h-5 accent-blue-600 cursor-pointer' })),
-                          h('div', { className: 'hidden md:block md:col-span-1 font-mono text-gray-500 text-sm break-words' }, student.seatNumber || '-'),
-                          h('div', { className: 'col-span-11 md:col-span-2 min-w-0 font-bold text-gray-800 text-lg md:text-base flex justify-between items-center gap-2' },
-                              h('span', { className: 'break-words min-w-0' }, h('span', { className: 'md:hidden text-gray-400 font-normal mr-2' }, student.seatNumber || '-'), student.name),
-                              h('div', { className: 'md:hidden font-mono font-bold text-green-600 shrink-0' }, '$', student.balance || 0)),
-                          h('div', { className: 'hidden md:block md:col-span-2 font-mono font-bold text-green-600' }, '$', student.balance || 0),
-                          h('div', { className: 'col-start-2 col-span-11 md:col-start-auto md:col-span-4 min-w-0 flex flex-wrap gap-1' },
-                              memberships(student).map(c => h('span', { key: c.id, className: 'text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded border break-words max-w-full' }, c.name)),
-                              memberships(student).length === 0 && h('span', { className: 'text-[10px] text-gray-400 italic' }, '未加入任何班級')),
-                          h('div', { className: 'col-start-2 col-span-11 md:col-start-auto md:col-span-2 flex flex-wrap justify-end gap-3 md:gap-2 mt-2 md:mt-0 border-t md:border-t-0 pt-3 md:pt-0' },
-                              h('button', { type: 'button', onClick: () => onDetail(student.id, 'student_management'), className: 'text-gray-500 hover:text-amber-600 flex items-center text-sm font-bold bg-amber-50 px-2 py-1 rounded' }, h(ExternalLink, { size: 14, className: 'mr-1' }), '詳情'),
-                              h('button', { type: 'button', onClick: event => onRename(event, student, true), 'aria-label': `編輯 ${student.name || '未命名'}`, className: 'text-gray-500 hover:text-blue-500 p-1' }, h(Edit2, { size: 16 })),
-                              h('button', { type: 'button', onClick: () => onDelete(student), 'aria-label': `刪除 ${student.name || '未命名'}`, className: 'text-gray-400 hover:text-red-500 p-1' }, h(Trash2, { size: 16 })))))),
-                  pagination('下方')));
-      }
       function App() {
           const [user, setUser] = useState(null);
           const [classesData, setClassesData] = useState([]);
@@ -383,7 +231,6 @@
           // 學生總表加入 Modal
           const [isSelectExistingOpen, setIsSelectExistingOpen] = useState(false);
           const [existingSearch, setExistingSearch] = useState('');
-          const [rosterView, setRosterView] = useState({ group: 'all', query: '', page: 1, pageSize: 20, selectedIds: [] });
           const [isAddGlobalStudentOpen, setIsAddGlobalStudentOpen] = useState(false);
           const [globalStudentName, setGlobalStudentName] = useState('');
           const [globalStudentSeat, setGlobalStudentSeat] = useState(''); // 全域座號
@@ -1343,7 +1190,38 @@
                                   React.createElement("input", { autoFocus: true, className: "flex-1 p-2 border rounded-lg text-sm outline-none focus:border-blue-400", placeholder: "\u5B78\u751F\u59D3\u540D", value: globalStudentName, onChange: e => setGlobalStudentName(e.target.value), onKeyDown: e => e.key === 'Enter' && handleCreateGlobalStudent() }),
                                   React.createElement("button", { onClick: handleCreateGlobalStudent, className: "bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-bold" }, "\u5132\u5B58"),
                                   React.createElement("button", { onClick: () => setIsAddGlobalStudentOpen(false), className: "bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm font-bold" }, "\u53D6\u6D88")))),
-                          React.createElement(StudentRoster, { students: safeStudents, classes: safeClasses, view: rosterView, setView: setRosterView, onDetail: handleSelectStudentDetail, onRename: openRenameStudent, onDelete: requestDeleteGlobalStudent })))) : viewMode === 'store_management' ? (
+                          React.createElement("div", { className: "bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden" },
+                              React.createElement("div", { className: "hidden md:grid grid-cols-12 gap-4 p-4 bg-blue-50 border-b font-bold text-gray-600 text-sm" },
+                                  React.createElement("div", { className: "col-span-2" }, "\u5EA7\u865F"),
+                                  React.createElement("div", { className: "col-span-2" }, "\u59D3\u540D"),
+                                  React.createElement("div", { className: "col-span-2" }, "\u7E3D\u9EDE\u6578"),
+                                  React.createElement("div", { className: "col-span-4" }, "\u6240\u5C6C\u73ED\u7D1A"),
+                                  React.createElement("div", { className: "col-span-2 text-right" }, "\u64CD\u4F5C")),
+                              React.createElement("div", { className: "divide-y divide-gray-100" },
+                                  safeStudents.length === 0 && React.createElement("div", { className: "p-8 text-center text-gray-400" }, "\u76EE\u524D\u7E3D\u8868\u4E2D\u6C92\u6709\u5B78\u751F"),
+                                  safeStudents.map(student => (React.createElement("div", { key: student.id, className: "flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 md:items-center hover:bg-blue-50/50 transition-colors" },
+                                      React.createElement("div", { className: "hidden md:block md:col-span-2 font-mono text-gray-500 text-sm" }, student.seatNumber || '-'),
+                                      React.createElement("div", { className: "md:col-span-2 font-bold text-gray-800 text-lg md:text-base flex justify-between items-center" },
+                                          React.createElement("span", null,
+                                              React.createElement("span", { className: "md:hidden text-gray-400 font-normal mr-2" }, student.seatNumber || '-'),
+                                              student.name),
+                                          React.createElement("div", { className: "md:hidden font-mono font-bold text-green-600" },
+                                              "$",
+                                              student.balance || 0)),
+                                      React.createElement("div", { className: "hidden md:block md:col-span-2 font-mono font-bold text-green-600" },
+                                          "$",
+                                          student.balance || 0),
+                                      React.createElement("div", { className: "md:col-span-4 flex flex-wrap gap-1" },
+                                          safeClasses.filter(c => isStudentInClass(student, c.id)).map(c => (React.createElement("span", { key: c.id, className: "text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded border" }, c.name))),
+                                          safeClasses.filter(c => isStudentInClass(student, c.id)).length === 0 && (React.createElement("span", { className: "text-[10px] text-gray-400 italic" }, "\u672A\u52A0\u5165\u4EFB\u4F55\u73ED\u7D1A"))),
+                                      React.createElement("div", { className: "md:col-span-2 flex justify-end gap-3 md:gap-2 mt-2 md:mt-0 border-t md:border-t-0 pt-3 md:pt-0" },
+                                          React.createElement("button", { onClick: () => handleSelectStudentDetail(student.id, 'student_management'), className: "text-gray-500 hover:text-amber-600 flex items-center text-sm font-bold bg-amber-50 px-2 py-1 rounded" },
+                                              React.createElement(ExternalLink, { size: 14, className: "mr-1" }),
+                                              "\u8A73\u60C5"),
+                                          React.createElement("button", { onClick: (e) => openRenameStudent(e, student, true), className: "text-gray-500 hover:text-blue-500 p-1" },
+                                              React.createElement(Edit2, { size: 16 })),
+                                          React.createElement("button", { onClick: () => requestDeleteGlobalStudent(student), className: "text-gray-400 hover:text-red-500 p-1" },
+                                              React.createElement(Trash2, { size: 16 }))))))))))) : viewMode === 'store_management' ? (
                   // =======================
                   // 商店管理頁面
                   // =======================
